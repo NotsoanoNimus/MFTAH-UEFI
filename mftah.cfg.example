@@ -14,8 +14,8 @@ title           = MFTAH Loader;
 
 color_bg        = black;
 color_text      = white         black;
-color_banner    = lightgreen    #00000000;
-color_title     = #ff12340b     black;
+color_banner    = lightgreen    @00000000;
+color_title     = @ff12340b     black;
 color_timer     = white         black;
 
 

@@ -1,0 +1,6 @@
+[submodule "gnu-efi"]
+	path = gnu-efi
+	url = https://github.com/ncroxon/gnu-efi
+[submodule "MFTAH"]
+	path = MFTAH
+	url = https://github.com/NotsoanoNimus/MFTAH

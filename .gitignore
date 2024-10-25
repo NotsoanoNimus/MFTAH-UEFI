@@ -50,3 +50,16 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+
+# Various IDEs
+**/.vscode
+**/.idea
+
+# EFI files
+*.efi
+*.EFI
+
+# Debug artifacts/files
+*.debug
+*.DEBUG

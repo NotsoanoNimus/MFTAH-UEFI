@@ -1,0 +1,3 @@
+{name=CrOws (Full);payload=/images/crows/Full.CEI;target=/EFI/BOOT/CROWS.EFI;type=mftahdisk;now=0;}
+{name=Normal Boot;payload=/EFI/BOOT/grubx64.efi;type=plain;default=1;}
+{name=Encrypted iPXE Binary;payload=/secret_ipxe.imgtype=mftahexe;}

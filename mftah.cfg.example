@@ -1,0 +1,47 @@
+# Global options.
+display = g;   # 'g' uses an enhanced graphical mode (default), while 't' uses a simple console mode.
+timeout = 5000;   # 5 seconds (5,000 milliseconds)
+max_timeout = 0;   # No maximum timeout
+
+banner = This is some sample text
+to display as an introductory menu banner
+    it will go on until a semi-colon is found
+
+
+...;
+
+title           = MFTAH Loader;
+
+color_bg        = black;
+color_text      = white         black;
+color_banner    = lightgreen    #00000000;
+color_title     = #ff12340b     black;
+color_timer     = white         black;
+
+
+# NOTE: All files are relative to the boot drive.
+
+# Load a MFTAH payload from within an encrypted disk image.
+{
+    name    = CrOws (Full);
+    payload = /images/crows/Full.CEI;
+    target  = /EFI/BOOT/CROWS.EFI;
+    type    = mftahdisk;
+    ###now     = 1;   # load immediately; skip subsequent chain options and prompting altogether
+}
+
+# Chainload an EFI file directly without decrypting anything or mounting a ramdisk.
+{
+    name    = Normal Boot;
+    payload = /EFI/BOOT/grubx64.efi;
+    type    = plain;
+    default = 1;   # Set this as the default menu selection.
+}
+
+# Chainload an encrypted EFI executable directly. The loaded MFTAH payload doesn't always
+#   need to be a virtual disk file!
+{
+    name    = Encrypted iPXE Binary;
+    payload = /secret_ipxe.img
+    type    = mftahexe;
+}

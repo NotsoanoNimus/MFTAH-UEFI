@@ -43,6 +43,7 @@ OBJS_GNUEFI		= $(patsubst %.c,%.o,$(SRCS_GNU_EFI) $(SRCS_ARCH) $(SRCS_RT))
 OBJS_MFTAHUEFI	= $(patsubst %.c,%.o,$(SRCS_MFTAHUEFI))
 
 OBJS			= $(OBJS_GNUEFI) $(OBJS_MFTAHUEFI)
+PSF_SRC			= $(SRC_DIR)/core/font.c
 
 TARGET			= MFTAH.EFI
 
@@ -50,6 +51,7 @@ TARGET			= MFTAH.EFI
 .PHONY: default
 .PHONY: clean
 .PHONY: clean-objs
+.PHONY: font
 .PHONY: debug
 .PHONY: all
 
@@ -58,9 +60,11 @@ default: all
 clean:
 	-rm $(TARGET)* &>/dev/null
 	-rm $(OBJS) &>/dev/null
+	-rm $(PSF_SRC) &>/dev/null
 
 clean-objs:
 	-rm $(OBJS) &>/dev/null
+	-rm $(PSF_SRC) &>/dev/null
 
 # We can assume a 'clean' should be run on all .o files
 #   after the build completes. This is because compilation
@@ -76,8 +80,14 @@ all: $(TARGET) clean-objs
 	$(CXX) $(CFLAGS) -c -o $@ $<
 
 
-$(TARGET): $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)
-	$(CXX) $(LDFLAGS) -o $(TARGET) $(OBJS) $(LIBMFTAH)
+font:
+	xxd -i font.psf >$(PSF_SRC)
+	$(CXX) $(CFLAGS) -c -o $(SRC_DIR)/core/font.o $(PSF_SRC)
+
+
+$(TARGET): font $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)
+	$(MAKE) -C . font
+	$(CXX) $(LDFLAGS) -o $(TARGET) $(OBJS) $(SRC_DIR)/core/font.o $(LIBMFTAH)
 
 
 # README dependency ensures the submodule is cloned 'properly'.

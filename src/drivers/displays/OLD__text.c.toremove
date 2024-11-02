@@ -1,0 +1,681 @@
+#include "../../include/drivers/displays/text.h"
+
+#include "../../include/core/util.h"
+
+
+
+typedef
+struct {
+    UINTN   Rows;
+    UINTN   Columns;
+} _PACKED TEXT_MODE_WRAPPER;
+
+
+typedef
+struct {
+    CHAR16  Glyph;
+    UINT8   Color;
+} _PACKED CONSOLE_PIXEL;
+
+typedef
+struct {
+    UINTN           ColSpan;   /* Intended width */
+    UINTN           RowSpan;   /* Intended height */
+    UINTN           PositionX;   /* X position when rendered */
+    UINTN           PositionY;   /* Y position when rendered */
+    UINT8           ZIndex;   /* Top-level precedence; higher = more prominent */
+    CONSOLE_PIXEL   *Buffer;   /* Actual data */
+} _PACKED CONSOLE_RECT;
+
+
+/* "Linear Console Buffer" */
+STATIC CONSOLE_RECT LCB = {
+    .ZIndex = 0, .PositionX = 0, .PositionY = 0,
+    /* These below are filled dynamically on init */
+    .Buffer = NULL, .ColSpan = 0, .RowSpan = 0
+};
+
+
+STATIC EFI_SIMPLE_TEXT_OUT_PROTOCOL *STOP = NULL;
+
+#define CONSOLE_MAX_RENDERABLES 32
+STATIC CONSOLE_RECT *Renderables[CONSOLE_MAX_RENDERABLES] = {0};
+STATIC UINTN RenderablesLength = 0;
+
+
+
+STATIC
+EFIAPI
+VOID
+FlushLCBPartial(UINTN X,
+                UINTN Y,
+                UINTN Width,
+                UINTN Height)
+{
+    // TODO! Improve this method's efficiency!
+#define FLUSH_LCB_OUT_LEN 2
+    CHAR16 Output[FLUSH_LCB_OUT_LEN] = {0};
+    CHAR16 Glyph;
+    UINT8 PreviousColor = 0, RunningLength = 0;
+    UINTN BufferLength = 0;
+
+    /* Constrain height and width of update. */
+    Height = MIN(LCB.RowSpan, Height);
+    Width = MIN(LCB.ColSpan, Width);
+
+    BufferLength = MIN(((LCB.ColSpan * LCB.RowSpan) - 1), (Width * Height));
+
+    /* Move the cursor to (X, Y). */
+    uefi_call_wrapper(STOP->SetCursorPosition, 3, STOP, X, Y);
+
+    /* Start the loop. Only call UEFI protocol if strictly necessary. */
+    for (UINTN i = ((Y * Width) + X); i < BufferLength; ++i) {
+        /* Fill in NULL or uninit values with spaces. */
+        Output[0] = (LCB.Buffer[i].Glyph) ? LCB.Buffer[i].Glyph : L' ';
+
+        if (PreviousColor != LCB.Buffer[i].Color) {
+            uefi_call_wrapper(STOP->SetAttribute, 2, STOP, LCB.Buffer[i].Color);
+            PreviousColor = LCB.Buffer[i].Color;
+        }
+
+        uefi_call_wrapper(STOP->OutputString, 2, STOP, Output);
+    }
+
+        // if (PreviousColor != LCB.Buffer[i].Color) {
+        //     uefi_call_wrapper(STOP->OutputString, 2, STOP, Output);
+
+        //     uefi_call_wrapper(STOP->SetAttribute, 2, STOP, LCB.Buffer[i].Color);
+        //     PreviousColor = LCB.Buffer[i].Color;
+        //     SetMem(Output, FLUSH_LCB_OUT_LEN, 0x00);
+
+        //     Output[0] = Glyph;
+        //     RunningLength = 1;
+        //     continue;
+        // } else if (RunningLength >= (FLUSH_LCB_OUT_LEN - 1)) {
+        //     uefi_call_wrapper(STOP->OutputString, 2, STOP, Output);
+
+        //     SetMem(Output, FLUSH_LCB_OUT_LEN, 0x00);
+
+        //     Output[0] = Glyph;
+        //     RunningLength = 1;
+        //     continue;
+        // }
+
+        // Output[RunningLength] = Glyph;
+        // ++RunningLength;
+    // }
+
+    // if (RunningLength > 0) {
+        // uefi_call_wrapper(STOP->OutputString, 2, STOP, Output);
+    // }
+
+        // /* For efficiency, we flush any time the color changes or the buffer is full. */
+        // while (
+        //     PreviousColor == LCB.Buffer[i].Color
+        //     && i < (BufferLength - 1)
+        //     && RunningLength < (FLUSH_LCB_OUT_LEN - 2)
+        // ) {
+        //     Output[RunningLength+1] = (LCB.Buffer[i].Glyph) ? LCB.Buffer[i].Glyph : L' ';
+
+        //     ++RunningLength;
+        //     ++i;
+        // }
+
+        // /* New color attribute or length limit(s): flush and clear the buffer. */
+        // uefi_call_wrapper(STOP->OutputString, 2, STOP, Output);
+        // SetMem(Output, FLUSH_LCB_OUT_LEN, 0x00);
+
+        // /* Don't drop this glyph son */
+        // uefi_call_wrapper(STOP->SetAttribute, 2, STOP, LCB.Buffer[i].Color);
+        // Output[0] = Glyph;
+
+        // RunningLength = 0;
+        // PreviousColor = LCB.Buffer[i].Color;
+    // }
+#undef FLUSH_LCB_OUT_LEN
+}
+
+
+STATIC
+EFIAPI
+VOID
+FlushLCB(VOID)
+{
+    /* Walk each "pixel" and output it to the screen. */
+    /* NOTE: Because of the way this writes the whole screen, there's always
+        one trailing blank line. Because of that, care should be taken with
+        0-based indexing in 'height'/'row' variables and inputs. */
+    FlushLCBPartial(0, 0, LCB.ColSpan, LCB.RowSpan);
+}
+
+
+STATIC
+EFIAPI
+CONSOLE_PIXEL *
+GetPixelLocation(CONSOLE_RECT *Block,
+                 UINTN X, UINTN Y)
+{
+    return (CONSOLE_PIXEL *)(
+        (X < Block->ColSpan && Y < Block->RowSpan)
+        ? (
+            (EFI_PHYSICAL_ADDRESS)(Block->Buffer)
+                + (Y * sizeof(CONSOLE_PIXEL) * Block->ColSpan)
+                + (X * sizeof(CONSOLE_PIXEL))
+        )
+        : NULL
+    );
+}
+
+
+STATIC
+EFIAPI
+VOID
+SetPixel(CONSOLE_RECT *Block,
+         UINTN X,
+         UINTN Y,
+         CHAR16 Glyph,
+         UINT8 Color)
+{
+    CONSOLE_PIXEL *p = GetPixelLocation(Block, X, Y);
+    if (!p) return;
+
+    p->Color = Color;
+    p->Glyph = Glyph;
+}
+
+
+STATIC
+EFIAPI
+VOID
+DrawRect(CONSOLE_RECT *Block,
+         UINTN AtX,
+         UINTN AtY,
+         UINTN Width,
+         UINTN Height,
+         CHAR16 Glyph,
+         UINT8 Color)
+{
+    if (
+        NULL == Block
+        || NULL == Block->Buffer
+        || 0 == Width
+        || 0 == Height
+        || (AtX + Width) > Block->ColSpan
+        || (AtY + Height) > Block->RowSpan
+    ) return;
+
+    for (UINTN i = AtY; i < (AtY + Height); ++i)
+        for (UINTN j = AtX; j < (AtX + Width); ++j)
+            SetPixel(Block, j, i, Glyph, Color);
+}
+
+
+STATIC
+EFIAPI
+VOID
+DrawLine(CONSOLE_RECT *Block,
+         UINTN AtX,
+         UINTN AtY,
+         UINTN ToX,
+         UINTN ToY,
+         CHAR16 Glyph,
+         UINT8 Color)
+{
+    if (
+        NULL == Block
+        || NULL == Block->Buffer
+        || (ToX == AtX && ToY == AtY)
+        || AtX > Block->ColSpan || ToX > Block->ColSpan
+        || AtY > Block->RowSpan || ToY > Block->RowSpan
+    ) return;
+
+    if (0 == Glyph) Glyph = L' ';
+
+    if (ToX == AtX) {
+        /* Vertical line. No thanks on the DIV BY 0 error. */
+        for (
+            UINTN i = AtY;
+            (ToY > AtY) ? (i <= ToY) : (i >= ToY);
+            i = (ToY > AtY) ? (i + 1) : (i - 1)
+        ) {
+            SetPixel(Block, AtX, i, Glyph, Color);
+        }
+
+        return;
+    }
+
+    /* Convert these items to doubles for more precise computation. */
+    double dAtX = (double)(AtX * 1.0), dAtY = (double)(AtY * 1.0);
+    double dToX = (double)(ToX * 1.0), dToY = (double)(ToY * 1.0);
+
+    /* Ah yes, "y = mx + b" finally comes in handy */
+    double slope = (dToY - dAtY) / (dToX - dAtX);
+
+    /* b = y - mx; we know (AtX, AtY) and (ToX, ToY) are points on the line. */
+    double intercept = dToY - (slope * dToX);   /* approximate */
+
+    for (
+        UINTN x = AtX;
+        (ToX > AtX) ? (x <= ToX) : (x >= ToX);
+        x = (ToX > AtX) ? (x + 1) : (x - 1)
+    ) {
+        double y = (slope * (double)(x * 1.0)) + intercept;   /* classic */
+
+        if (y < 0 || (UINT32)y > Block->RowSpan) continue;
+
+        SetPixel(Block, x, (UINT32)y, Glyph, Color);
+    }
+}
+
+
+STATIC
+EFIAPI
+VOID
+DrawBox(CONSOLE_RECT *Block,
+        UINTN AtX,
+        UINTN AtY,
+        UINTN ToX,
+        UINTN ToY,
+        CHAR16 Glyph,
+        UINT8 Color)
+{
+    if (
+        NULL == Block
+        || NULL == Block->Buffer
+        || (ToX == AtX && ToY == AtY)
+        || AtX > Block->ColSpan || ToX > Block->ColSpan
+        || AtY > Block->RowSpan || ToY > Block->RowSpan
+    ) return;
+
+    DrawLine(Block, AtX, AtY, ToX, AtY, Glyph, Color);   /* Top line */
+    DrawLine(Block, AtX, ToY, ToX, ToY, Glyph, Color);   /* Bottom line */
+    DrawLine(Block, AtX, AtY, AtX, ToY, Glyph, Color);   /* Left line */
+    DrawLine(Block, ToX, AtY, ToX, ToY, Glyph, Color);   /* Right line */
+}
+
+
+STATIC
+EFIAPI
+VOID
+TPrint(CONSOLE_RECT *Block,
+       UINTN X,
+       UINTN Y,
+       CHAR8 *String,
+       UINT8 Color)
+{
+    if (
+        NULL == Block
+        || NULL == Block->Buffer
+        || X >= Block->ColSpan
+        || Y >= Block->RowSpan
+        || NULL == String
+        || ((AsciiStrLen(String) + X + (Block->ColSpan * Y)) >= (Block->RowSpan * Block->ColSpan))
+    ) return;
+
+    // CONSOLE_PIXEL *Start = GetPixelLocation(Block, X, Y);
+    // if (NULL == Start) return;
+
+    // for (UINTN i = 0, j; i < AsciiStrLen(String); ++i) {
+    //     Start[i].Glyph = (CHAR16)(String[i]);
+    //     Start[i].Color = Color;
+    // }
+    for (UINTN i = 0, j = X; i < AsciiStrLen(String); ++i, ++j)
+        SetPixel(Block, j, Y, String[i], Color);
+}
+
+
+STATIC
+EFIAPI
+EFI_STATUS
+BlockTransferToLCB(CONSOLE_RECT *Block,
+                   UINTN SourceX,
+                   UINTN SourceY,
+                   UINTN DestinationX,
+                   UINTN DestinationY,
+                   UINTN Width,
+                   UINTN Height)
+{
+    if (
+        NULL == Block
+        || (DestinationX + Width) > LCB.ColSpan
+        || (DestinationY + Height) > LCB.RowSpan
+        || (SourceX + Width) > Block->ColSpan
+        || (SourceY + Height) > Block->RowSpan
+        || NULL == Block->Buffer
+        || 0 == Block->RowSpan
+        || 0 == Block->ColSpan
+    ) return EFI_INVALID_PARAMETER;
+
+    for (UINTN i = 0; i < Height; ++i) {
+        CopyMem(
+            (VOID *)GetPixelLocation(&LCB, DestinationX, (DestinationY + i)),
+            (VOID *)GetPixelLocation(Block, SourceX, (SourceY + i)),
+            (Width * sizeof(CONSOLE_PIXEL))
+        );
+    }
+
+    return EFI_SUCCESS;
+}
+
+
+STATIC
+EFIAPI
+EFI_STATUS
+LCBTransferToBuffer(CONSOLE_RECT *Block,
+                    UINTN SourceX,
+                    UINTN SourceY,
+                    UINTN DestinationX,
+                    UINTN DestinationY,
+                    UINTN Width,
+                    UINTN Height)
+{
+    if (
+        NULL == Block
+        || (SourceX + Width) > LCB.ColSpan
+        || (SourceY + Height) > LCB.RowSpan
+        || (DestinationX + Width) > Block->ColSpan
+        || (DestinationY + Height) > Block->RowSpan
+        || NULL == Block->Buffer
+        || 0 == Block->RowSpan
+        || 0 == Block->ColSpan
+    ) return EFI_INVALID_PARAMETER;
+
+    for (UINTN i = 0; i < Height; ++i) {
+        CopyMem(
+            (VOID *)GetPixelLocation(Block, DestinationX, (DestinationY + i)),
+            (VOID *)GetPixelLocation(&LCB, SourceX, (SourceY + i)),
+            (Width * sizeof(CONSOLE_PIXEL))
+        );
+    }
+
+    return EFI_SUCCESS;
+}
+
+
+STATIC
+EFIAPI
+VOID
+ClearScreen(IN UINT32 Color)
+{
+    EFI_COLOR(Color);
+    uefi_call_wrapper(STOP->ClearScreen, 1, STOP);
+
+    /* Print a bunch of newline characters as a more explicit 'clear-screen' op. */
+    CHAR16 Output[3] = { L'\r', L'\n', 0x0000 };
+    for (UINTN i = 0; i < (LCB.RowSpan + 5); ++i) {
+        uefi_call_wrapper(STOP->OutputString, 2, STOP, Output);
+    }
+
+    /* Catch the LCB up to speed. */
+    CONSOLE_PIXEL p = { .Color = Color, .Glyph = L' ' };
+    for (UINTN i = 0; i < (LCB.RowSpan * LCB.ColSpan); ++i) {
+        CopyMem((VOID *)&(LCB.Buffer[i]), &p, sizeof(CONSOLE_PIXEL));
+    }
+}
+
+
+STATIC
+EFIAPI
+CHAR8 *
+InputPopup(IN CHAR8 *Prompt,
+           IN UINTN MaxLength,
+           IN BOOLEAN IsHidden)
+{
+    /* Display a notification. The TEXT mode can dynamically determine
+        where and how to place it based on the "resolution" of LCB. This
+        must pause for user input, terminated by the ENTER key. */
+    CONSOLE_RECT popup = {0};
+}
+
+
+STATIC
+EFIAPI
+BOOLEAN
+Confirmation(IN CHAR8 *Prompt)
+{
+    // TODO
+    return FALSE;
+}
+
+
+STATIC
+EFIAPI
+VOID
+InnerPopup(IN CHAR8 *Message,
+           IN UINT8 Color)
+{
+    /* Display a notification. The TEXT mode can dynamically determine
+        where and how to place it based on the "resolution" of LCB. This
+        must pause for the ENTER key for the user to 'press OK'. */
+    CONSOLE_RECT popup = {0};
+}
+
+
+STATIC
+EFIAPI
+VOID
+Popup(IN CHAR8 *Message)
+{
+    /* Proxy to inner method with a specific coloring. */
+    return InnerPopup(Message, (EFI_WHITE | EFI_BACKGROUND_BLUE));
+}
+
+
+STATIC
+EFIAPI
+VOID
+WarningPopup(IN CHAR8 *Message)
+{
+    /* Just proxy this to 'popup' with a different color. */
+    return InnerPopup(Message, (EFI_YELLOW | EFI_BACKGROUND_RED));
+}
+
+
+STATIC
+EFIAPI
+VOID
+DrawMenu(IN CONFIGURATION *c,
+         IN MENU_STATE *m)
+{
+    CONSOLE_RECT *r = NULL;
+
+    ClearScreen(c->Colors.Background);
+
+    /* The Z-index value walks upwards from 0 to 100 only. */
+    for (UINTN z = 0; z <= 100; ++z) {
+        for (UINTN i = 0; i < RenderablesLength; ++i) {
+            if (NULL == Renderables[i] || Renderables[i]->ZIndex != z) continue;
+
+            r = Renderables[i];
+            BlockTransferToLCB(r,
+                               0, 0,
+                               r->PositionX, r->PositionY,
+                               r->ColSpan, r->RowSpan);
+        }
+    }
+
+    FlushLCB();
+}
+
+
+STATIC
+EFIAPI
+EFI_STATUS
+InitMenu(IN CONFIGURATION *c,
+         IN MENU_STATE *State)
+{
+    /* Initialize all primary menu shapes according to LCB dimensions. */
+    if (NULL == c || NULL == State) return EFI_INVALID_PARAMETER;
+
+    /* Create the main "window", complete with a cute title at the top. */
+    Renderables[0] = (CONSOLE_RECT *)AllocateZeroPool(sizeof(CONSOLE_RECT));
+    if (NULL == Renderables[0]) return EFI_OUT_OF_RESOURCES;
+
+    Renderables[0]->ZIndex = 1;
+    Renderables[0]->PositionX = LCB.ColSpan / 8;
+    Renderables[0]->PositionY = 6;
+    Renderables[0]->RowSpan = MAX((LCB.RowSpan - 10), 20);
+    Renderables[0]->ColSpan = (6 * (LCB.ColSpan / 8));
+    Renderables[0]->Buffer = (CONSOLE_PIXEL *)AllocateZeroPool(
+        sizeof(CONSOLE_PIXEL) * Renderables[0]->RowSpan * Renderables[0]->ColSpan);
+    DrawBox(
+        Renderables[0], 0, 0, Renderables[0]->ColSpan, Renderables[0]->RowSpan,
+        BOXDRAW_DOUBLE_HORIZONTAL,
+        (c->Colors.Text.Foreground | c->Colors.Text.Background)
+    );
+    ++RenderablesLength;
+
+    return EFI_SUCCESS;
+}
+
+
+EFI_STATUS
+TextModeInit(CONFIGURATION *c)
+{
+    if (NULL == c) return EFI_INVALID_PARAMETER;
+
+    EFI_STATUS Status = EFI_SUCCESS;
+    UINTN Columns = 0, Rows = 0, LargestConsoleSize = 0,
+        NativeMode, NumberOfModes, BestMode, SelectedMode;
+
+    ERRCHECK_UEFI(BS->LocateProtocol, 3,
+                  &gEfiSimpleTextOutProtocolGuid,
+                  NULL,
+                  (VOID **)&STOP);
+
+    Status = uefi_call_wrapper(STOP->QueryMode, 4,
+                               STOP,
+                               ((NULL == STOP->Mode) ? 0 : STOP->Mode->Mode),
+                               &Columns,
+                               &Rows);
+    if (EFI_ERROR(Status)) {
+        EFI_DANGERLN("Failure querying TEXT console modes.");
+        return Status;
+    }
+
+    NativeMode = STOP->Mode->Mode;
+    NumberOfModes = STOP->Mode->MaxMode;
+
+    TEXT_MODE_WRAPPER *modes = (TEXT_MODE_WRAPPER *)
+        AllocateZeroPool(sizeof(TEXT_MODE_WRAPPER) * NumberOfModes);
+
+    PRINTLN("TEXT:  Inspecting %u console modes...", NumberOfModes);
+
+    for (UINTN i = 0; i < NumberOfModes; ++i) {
+        Status = uefi_call_wrapper(STOP->QueryMode, 4, STOP, i, &Columns, &Rows);
+
+        if (EFI_ERROR(Status)) {
+            EFI_WARNINGLN("NOTICE: TEXT:  Error while querying mode #%u (Code %u).", i, Status);
+            continue;
+        }
+
+        /* NOTE: The array index IS the mode #. */
+        modes[i].Rows = Rows;
+        modes[i].Columns = Columns;
+
+        if ((Columns * Rows) > LargestConsoleSize) {
+            BestMode = i;
+            LargestConsoleSize = (Columns * Rows);
+        }
+
+        EFI_COLOR(MFTAH_COLOR_DEBUG);
+        PRINTLN(
+            "Detected console mode %03u (R by C -> %u x %u)%a",
+            i,
+            Rows,
+            Columns,
+            (i == NativeMode) ? "  (current)" : ""
+        );
+        EFI_COLOR(MFTAH_COLOR_DEFAULT);
+    }
+
+    PRINTLN("Finished enumerating console modes.");
+
+    if (NativeMode == BestMode) {
+        SelectedMode = NativeMode;
+        goto TextModeInit__Set;
+    }
+
+    PRINTLN("Setting text mode #%u...", BestMode);
+    if (EFI_ERROR((Status = uefi_call_wrapper(STOP->SetMode, 2, STOP, BestMode)))) {
+        /* Enumerate modes (fall back) and accept the first one. */
+        for (UINTN i = 0; i < NumberOfModes; ++i) {
+            if (!(modes[i].Rows)) continue;
+            if (EFI_ERROR((Status = uefi_call_wrapper(STOP->SetMode, 2, STOP, i)))) continue;
+
+            SelectedMode = i;
+            PRINTLN("   Set fallback mode #%u.", SelectedMode);
+            goto TextModeInit__Set;
+        }
+
+        /* Failed to set a mode. :( */
+        PANIC("Failed to select and enable any available TEXT mode.");
+    } else SelectedMode = BestMode;
+
+TextModeInit__Set:
+    /* Yes, I am aware that I could've just run `QueryMode` on SelectedMode to get this info. */
+    LCB.RowSpan = modes[SelectedMode].Rows;
+    LCB.ColSpan = modes[SelectedMode].Columns;
+    LCB.Buffer = (CONSOLE_PIXEL *)
+        AllocateZeroPool(sizeof(CONSOLE_PIXEL) * LCB.RowSpan * LCB.ColSpan);
+
+    FreePool(modes);
+
+    /* Regardless of the selected TEXT mode, hide the cursor. The result of 
+        this is purposefully discarded. */
+    uefi_call_wrapper(STOP->Reset, 2, STOP, TRUE);
+    uefi_call_wrapper(STOP->EnableCursor, 2, STOP, FALSE);
+
+    /* Testing: Keep for now, just in case. */
+    // TODO: DELETE WHEN FINISHED
+    for (UINTN i = 0; i < (LCB.ColSpan * LCB.RowSpan); ++i) {
+        LCB.Buffer[i].Color = MFTAH_COLOR_WARNING;
+        LCB.Buffer[i].Glyph = 'A' + (i % 52);
+    }
+    CONSOLE_RECT x = {
+        .Buffer = AllocateZeroPool(sizeof(CONSOLE_PIXEL) * 25 * 10),
+        .ZIndex = 1, .ColSpan = 25, .RowSpan = 10
+    };
+    FlushLCB();
+    for (UINTN i = 0; i < (x.ColSpan * x.RowSpan); ++i) { x.Buffer[i].Glyph = L' '; x.Buffer[i].Color = (EFI_LIGHTGREEN | EFI_BACKGROUND_LIGHTGRAY); }
+    BlockTransferToLCB(&x, 1, 1, 4, 6, 20, 7);
+    FlushLCB();
+    SetPixel(&LCB, 20, 15, L'X', (EFI_WHITE | EFI_BACKGROUND_LIGHTGRAY));
+    FlushLCB();
+    DrawLine(&LCB, 0, 20, 40, 0, BOXDRAW_VERTICAL_HORIZONTAL, (EFI_WHITE | EFI_BACKGROUND_BLACK));
+    DrawLine(&LCB, 10, 0, 10, 20, BOXDRAW_DOUBLE_VERTICAL_HORIZONTAL, (EFI_WHITE | EFI_BACKGROUND_BLACK));
+    FlushLCB();
+    DrawRect(&LCB, 10, 20, 50, 5, L'.', (EFI_LIGHTRED | EFI_BACKGROUND_BLACK));
+    DrawBox(&LCB, 10, 2, 20, 25, L'.', (EFI_LIGHTRED | EFI_BACKGROUND_BLACK));
+    TPrint(&LCB, 20, 25, "This is a test", (EFI_BLACK | EFI_BACKGROUND_LIGHTGRAY));
+    FlushLCB();
+    uefi_call_wrapper(BS->Stall, 1, 20000000);
+
+    ClearScreen(c->Colors.Background & 0xFF);
+
+    return EFI_SUCCESS;
+}
+
+
+EFI_STATUS
+TextModePopulateMenu(OUT EFI_MENU_RENDERER_PROTOCOL *Renderer)
+{
+    if (NULL == Renderer) return EFI_INVALID_PARAMETER;
+
+    Renderer->Initialize    = InitMenu;
+    Renderer->InputPopup    = InputPopup;
+    Renderer->Confirmation  = Confirmation;
+    Renderer->Popup         = Popup;
+    Renderer->WarningPopup  = WarningPopup;
+    Renderer->Redraw        = DrawMenu;
+    Renderer->ClearScreen   = ClearScreen;
+
+    return EFI_SUCCESS;
+}
+
+
+EFI_STATUS
+TextModeDestroy(VOID)
+{
+    FreePool(LCB.Buffer);
+}

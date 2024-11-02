@@ -63,3 +63,6 @@ dkms.conf
 # Debug artifacts/files
 *.debug
 *.DEBUG
+
+# Auto-generated font blob from PSF
+./src/core/font.c

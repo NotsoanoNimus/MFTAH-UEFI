@@ -159,12 +159,22 @@ MenuLoop(CONFIGURATION *c,
                   1 * 100 * 1000 * 10);
 
 MenuLoop__Main:
-    if (EFI_SUCCESS != ReadKey(&KeyData)) {
+    Status = ReadKey(&KeyData,
+                     (FALSE == m->KeyPressReceived && c->Timeout > 0)
+                        ? (c->Timeout + 200)
+                        : 0);
+
+    if (EFI_ERROR(Status) && EFI_TIMEOUT != Status) {
         GPrint("Unknown keyboard input failure.", FB->BLT, 20, 20, 0xFFFF0000, 0, FALSE, 2);
         uefi_call_wrapper(BS->Stall, 1, 3000000);
 
         Status = EFI_DEVICE_ERROR;
         goto MenuLoop__Break;
+    }
+
+    if (TRUE == m->TimeoutOccurred || EFI_TIMEOUT == Status) {
+        m->CurrentItemIndex = m->DefaultItemindex;
+        goto MenuLoop__SelectEntry;
     }
 
     m->KeyPressReceived = TRUE;   /* Can use this to cancel the regular timeout */
@@ -201,6 +211,7 @@ MenuLoop__Main:
     switch (KeyData.Key.UnicodeChar) {
         case L'\r':
         case L'\n':
+        MenuLoop__SelectEntry:
             /* Be sure to temporarily stop the timer from updating the framebuffer. */
             m->PauseTickRenders = TRUE;
 
@@ -218,7 +229,6 @@ MenuLoop__Main:
                 /* The chain's rudimentary validation has passed. Pass along basically
                     the entire program context and attempt to load the chain.  */
                 uefi_call_wrapper(BS->CloseEvent, 1, TimerEvent);
-                MENU->ClearScreen(c->Colors.Background);
                 FreePool(ValidationErrorMsg);
 
                 /* you are now leaving the main menu :) */

@@ -20,6 +20,7 @@ struct {
     UINTN               ItemsListLength;
     UINTN               CurrentItemIndex;
     UINTN               DefaultItemindex;
+    VOLATILE BOOLEAN    TimeoutOccurred;
     VOLATILE BOOLEAN    PauseTickRenders;
     VOLATILE BOOLEAN    KeyPressReceived;
     VOLATILE UINTN      MillisecondsElapsed;

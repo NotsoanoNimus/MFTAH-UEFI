@@ -334,24 +334,15 @@ TimerTick(EFI_EVENT Event,
         && GraphicsContext->NormalTimeout > 0
         && m->MillisecondsElapsed >= GraphicsContext->NormalTimeout
     ) {
-        /* A normal timeout has occurred. Load the default index. */
-        CHAR8 *ValidationErrorMsg = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * 256);
-        if (NULL == ValidationErrorMsg) {
-            // TODO: Error popup?? Out of memory, so this might mean the program needs to stop.
-        }
+        /* A normal timeout has occurred. Signal to the menu handler. */
+        uefi_call_wrapper(BS->CloseEvent, 1, Event);
 
-        m->CurrentItemIndex = m->DefaultItemindex;
-        if (EFI_ERROR(LoaderValidateChain(c, m, ValidationErrorMsg))) {
-            PANIC_GUI("The default configuration chain is not valid!");
-            uefi_call_wrapper(BS->Stall, 1, 10000000);
-            Shutdown(EFI_LOAD_ERROR);
-            // TODO: Error popup??
-        }
+        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, c, m, NULL);
+        FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
+        uefi_call_wrapper(BS->Stall, 1, 2000000);
 
-        FreePool(ValidationErrorMsg);
-        LoaderEnterChain(c, m, MENU);
-
-        return;   /* SHOULD never be reached, but just in case (tm) */
+        m->TimeoutOccurred = TRUE;
+        return;
     }
 
     if (
@@ -363,17 +354,8 @@ TimerTick(EFI_EVENT Event,
         /* First, cancel the event. */
         uefi_call_wrapper(BS->CloseEvent, 1, Event);
 
-        /* Draw the base state of the timeouts panel. */
-        BOUNDED_SHAPE *t = GraphicsContext->TimeoutsLayer;
-        t->Draw(t, c, m, NULL);
-
-        /* Copy the BLT up to the root BLT and publish it. */
-        FB_VERTEX Origin = {0};
-        FB->BltToBlt(FB, FB->BLT, t, t->Position, Origin, t->Dimensions);
-        FB->FlushPartial(FB,
-                         t->Position.X, t->Position.Y,
-                         t->Position.X, t->Position.Y,
-                         t->Dimensions.Width, t->Dimensions.Height);
+        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, c, m, NULL);
+        FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
         uefi_call_wrapper(BS->Stall, 1, 2000000);
 
         Shutdown(EFI_TIMEOUT);
@@ -409,16 +391,8 @@ TimerTick(EFI_EVENT Event,
         }
 
         /* Draw the base state of the timeouts panel. */
-        BOUNDED_SHAPE *t = GraphicsContext->TimeoutsLayer;
-        t->Draw(t, c, m, NULL);
-
-        /* Copy the BLT up to the root BLT and publish it. */
-        FB_VERTEX Origin = {0};
-        FB->BltToBlt(FB, FB->BLT, t, t->Position, Origin, t->Dimensions);
-        FB->FlushPartial(FB,
-                         t->Position.X, t->Position.Y,
-                         t->Position.X, t->Position.Y,
-                         t->Dimensions.Width, t->Dimensions.Height);
+        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, c, m, NULL);
+        FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
     }
 
     /* Keep track of how many seconds have elapsed. */
@@ -866,6 +840,7 @@ DECL_DRAW_FUNC(Timeouts)
 {
     EFI_GRAPHICS_OUTPUT_BLT_PIXEL timeout = {0};
     CHAR8 *NoTimeoutStr = "No timeout values are set.";
+    CHAR8 *DefaultTimeoutStr = "Choosing default menu option...";
     CHAR8 *MaxTimeoutStr = "Maximum timeout exceeded! Shutting down!";
 
     BltPixelFromARGB(&timeout, c->Colors.Timer.Background);
@@ -875,37 +850,50 @@ DECL_DRAW_FUNC(Timeouts)
     FB_VERTEX f = {0}, t = { .X = This->Dimensions.Width-1, .Y = This->Dimensions.Height-1 };
     FB->DrawSimpleShape(FB, This, FbShapeRectangle, f, t, 0, FALSE, 1, 0x00000000);
 
-    if (m->MillisecondsElapsed < c->Timeout && FALSE == m->KeyPressReceived) {
-        GPrint(GraphicsContext->NormalTimeoutText,
-               This,
-               LAYOUT_G_TEXT_LEFT_PADDING,
-               (LAYOUT_G_GLYPH_HEIGHT / 2),
-               c->Colors.Timer.Foreground,
-               c->Colors.Timer.Background,
-               FALSE,
-               GraphicsContext->Zoom);
+    if (FALSE == m->KeyPressReceived && c->Timeout > 0) {
+        if (m->MillisecondsElapsed < c->Timeout) {
+            GPrint(GraphicsContext->NormalTimeoutText,
+                   This,
+                   LAYOUT_G_TEXT_LEFT_PADDING,
+                   (LAYOUT_G_GLYPH_HEIGHT / 2),
+                   c->Colors.Timer.Foreground,
+                   c->Colors.Timer.Background,
+                   FALSE,
+                   GraphicsContext->Zoom);
+        } else {
+            GPrint(DefaultTimeoutStr,
+                   This,
+                   LAYOUT_G_TEXT_LEFT_PADDING,
+                   LAYOUT_G_GLYPH_HEIGHT,
+                   0xFFFF0000,
+                   0x00000000,
+                   FALSE,
+                   GraphicsContext->Zoom);
+            return;
+        }
     }
 
-    if (m->MillisecondsElapsed < c->MaxTimeout) {
-        GPrint(GraphicsContext->MaxTimeoutText,
-               This,
-               LAYOUT_G_TEXT_LEFT_PADDING,
-               (LAYOUT_G_GLYPH_HEIGHT * 3) / 2,
-               c->Colors.Timer.Foreground,
-               c->Colors.Timer.Background,
-               FALSE,
-               GraphicsContext->Zoom);
-    }
-
-    if (m->MillisecondsElapsed > c->MaxTimeout && 0 != c->MaxTimeout) {
-        GPrint(MaxTimeoutStr,
-               This,
-               LAYOUT_G_TEXT_LEFT_PADDING,
-               LAYOUT_G_GLYPH_HEIGHT,
-               0xFFFF0000,
-               0x00000000,
-               FALSE,
-               GraphicsContext->Zoom);
+    if (c->MaxTimeout > 0) {
+        if (m->MillisecondsElapsed < c->MaxTimeout) {
+            GPrint(GraphicsContext->MaxTimeoutText,
+                   This,
+                   LAYOUT_G_TEXT_LEFT_PADDING,
+                   (LAYOUT_G_GLYPH_HEIGHT * 3) / 2,
+                   c->Colors.Timer.Foreground,
+                   c->Colors.Timer.Background,
+                   FALSE,
+                   GraphicsContext->Zoom);
+        } else {
+            GPrint(MaxTimeoutStr,
+                   This,
+                   LAYOUT_G_TEXT_LEFT_PADDING,
+                   LAYOUT_G_GLYPH_HEIGHT,
+                   0xFFFF0000,
+                   0x00000000,
+                   FALSE,
+                   GraphicsContext->Zoom);
+            return;
+        }
     }
 
     if (0 == c->Timeout && 0 == c->MaxTimeout) {

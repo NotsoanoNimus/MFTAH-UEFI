@@ -426,6 +426,35 @@ DrawSimpleShape(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 }
 
 
+STATIC
+EFIAPI
+EFI_STATUS
+RenderComponent(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+                IN BOUNDED_SHAPE *ObjectBltBuffer,
+                IN BOOLEAN Flush)
+{
+    EFI_STATUS Status = EFI_SUCCESS;
+
+    /* Copy the BLT up to the root BLT and publish it. */
+    FB_VERTEX Origin = {0};
+    FB->BltToBlt(FB,
+                 FB->BLT,
+                 ObjectBltBuffer,
+                 ObjectBltBuffer->Position,
+                 Origin,
+                 ObjectBltBuffer->Dimensions);
+
+    if (TRUE == Flush) {
+        FB->FlushPartial(FB,
+                         ObjectBltBuffer->Position.X, ObjectBltBuffer->Position.Y,
+                         ObjectBltBuffer->Position.X, ObjectBltBuffer->Position.Y,
+                         ObjectBltBuffer->Dimensions.Width, ObjectBltBuffer->Dimensions.Height);
+    }
+
+    return Status;
+}
+
+
 EFI_STATUS
 FramebufferInit(EFI_GRAPHICS_OUTPUT_PROTOCOL *GOP)
 {
@@ -448,6 +477,7 @@ FramebufferInit(EFI_GRAPHICS_OUTPUT_PROTOCOL *GOP)
     FrameBuff->RenderGlyph      = RenderGlyph;
     FrameBuff->DrawSimpleShape  = DrawSimpleShape;
     FrameBuff->DrawPolygon      = DrawPolygon;
+    FrameBuff->RenderComponent  = RenderComponent;
 
     // TODO: Detect these with a dynamic font
     FrameBuff->BaseGlyphSize.Width  = 8;   /* default */

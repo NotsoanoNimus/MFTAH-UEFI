@@ -167,6 +167,14 @@ EFI_STATUS
     BOOLEAN                         ConnectLastPoint
 );
 
+typedef
+EFI_STATUS
+(EFIAPI *FB_HOOK__RENDER_COMPONENT)(
+    IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL    *This,
+    IN BOUNDED_SHAPE                            *ObjectBltBuffer,
+    IN BOOLEAN                                  Flush
+);
+
 
 struct S_FB_PROTO {
     EFI_GRAPHICS_OUTPUT_PROTOCOL    *GOP;
@@ -187,6 +195,7 @@ struct S_FB_PROTO {
     FB_HOOK__RENDER_GLYPH           RenderGlyph;
     FB_HOOK__DRAW_SIMPLE_SHAPE      DrawSimpleShape;
     FB_HOOK__DRAW_POLYGON           DrawPolygon;
+    FB_HOOK__RENDER_COMPONENT       RenderComponent;
 } _PACKED;
 
 

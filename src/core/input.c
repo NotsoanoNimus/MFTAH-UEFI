@@ -7,13 +7,37 @@ STATIC EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL *STIEP = NULL;
 
 
 EFI_STATUS
-ReadKey(EFI_KEY_DATA *KeyData)
+ReadKey(OUT EFI_KEY_DATA *KeyData,
+        IN UINTN TimeoutMilliseconds)
 {
     EFI_STATUS Status = EFI_SUCCESS;
-    EFI_EVENT KeyEvent = {0};
     EFI_GUID gEfiSimpleTextInputExProtocolGuid = EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL_GUID;
 
-    uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
+    /* Helpful but also janky af: https://github.com/tianocore-docs/edk2-UefiDriverWritersGuide/blob/master/5_uefi_services/52_services_that_uefi_drivers_rarely_use/5210_installconfigurationtable.md#52101-waitforevent */
+    EFI_EVENT InputEvents[2] = {0};
+    UINTN FiredEventIndex = 0;
+
+    if (TimeoutMilliseconds > 0) {
+        /* Create a timeout event. */
+        Status = uefi_call_wrapper(BS->CreateEvent, 5,
+                                   (EVT_TIMER),
+                                   TPL_NOTIFY,
+                                   NULL,
+                                   NULL,
+                                   &InputEvents[1]);
+        if (EFI_ERROR(Status)) {
+            PANIC("Failed to create input timeout event.");
+        }
+
+        Status = uefi_call_wrapper(BS->SetTimer, 3,
+                                   InputEvents[1],
+                                   TimerRelative,
+                                   TimeoutMilliseconds * 10 * 1000);
+        if (EFI_ERROR(Status)) {
+            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            PANIC("Failed to start input timeout timer.");
+        }
+    }
 
     if (NULL == STIEP) {
         Status = uefi_call_wrapper(BS->LocateProtocol, 3,
@@ -26,6 +50,18 @@ ReadKey(EFI_KEY_DATA *KeyData)
     uefi_call_wrapper(STIEP->Reset, 2, STIEP, FALSE);
 
     while (TRUE) {
+        InputEvents[0] = STIEP->WaitForKeyEx;
+        ERRCHECK_UEFI(BS->WaitForEvent, 3,
+                      (TimeoutMilliseconds > 0 ? 2 : 1),
+                      InputEvents,
+                      &FiredEventIndex);
+
+        if (1 == FiredEventIndex && TimeoutMilliseconds > 0) {
+            /* The input event timed out. */
+            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            return EFI_TIMEOUT;
+        }
+
         Status = uefi_call_wrapper(STIEP->ReadKeyStrokeEx, 2, STIEP, KeyData);
 
         if (EFI_NOT_READY == Status) {
@@ -42,15 +78,28 @@ ReadKey(EFI_KEY_DATA *KeyData)
 
 ReadKey__Fallback:
     SetMem(KeyData, sizeof(EFI_KEY_DATA), 0x00);
-    ERRCHECK_UEFI(BS->WaitForEvent, 3, 1, &(ST->ConIn->WaitForKey), &KeyEvent);
+    uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
 
     while (TRUE) {
+        InputEvents[0] = ST->ConIn->WaitForKey;
+        ERRCHECK_UEFI(BS->WaitForEvent, 3,
+                      (TimeoutMilliseconds > 0 ? 2 : 1),
+                      InputEvents,
+                      &FiredEventIndex);
+
+        if (1 == FiredEventIndex && TimeoutMilliseconds > 0) {
+            /* The input event timed out. */
+            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            return EFI_TIMEOUT;
+        }
+
         Status = uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &(KeyData->Key));
 
         if (EFI_NOT_READY == Status) {
             /* No keystroke data is available. Move on. */
             continue;
         } else if (EFI_ERROR(Status)) {
+            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
             return Status;
         }
 
@@ -62,6 +111,10 @@ ReadKey__Fallback:
 
 ReadKey__Success:
     uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
+
+    if (TimeoutMilliseconds > 0 && !!InputEvents[1]) {
+        uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+    }
 
     return EFI_SUCCESS;
 }

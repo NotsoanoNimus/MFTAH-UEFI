@@ -27,7 +27,8 @@ VOID (EFIAPI *PRINT_HOOK)(
  */
 EFI_STATUS
 ReadKey(
-    OUT EFI_KEY_DATA    *KeyData
+    OUT EFI_KEY_DATA    *KeyData,
+    IN UINTN            TimeoutMilliseconds
 );
 
 #define READKEY_FALLBACK_INDICATOR  0xFABAFABA

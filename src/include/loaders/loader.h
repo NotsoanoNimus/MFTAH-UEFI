@@ -27,6 +27,7 @@ struct {
     HOOK_STALL              StallFunc;
     EFI_PHYSICAL_ADDRESS    LoadedImageBase;
     UINTN                   LoadedImageSize;
+    mftah_payload_t         *MftahPayloadWrapper;
 } _PACKED LOADER_CONTEXT;
 
 

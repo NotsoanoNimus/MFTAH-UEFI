@@ -41,7 +41,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
     EFI_FILE_PROTOCOL *VolumeHandle = NULL;
     EFI_FILE_PROTOCOL *LoadedFileHandle = NULL;
 
-    UINTN ChunkReadSize = (1 << 12);   /* 4 KiB */
+    UINTN ChunkReadSize = (1 << 16);   /* 64 KiB */
     UINT8 *Buffer = NULL;
 
     if (
@@ -101,13 +101,13 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
 
     /* Update the known size of the file. */
     *LoadedFileSize = FileSize(LoadedFileHandle);
-    if (0 == LoadedFileSize) {
+    if (0 == *LoadedFileSize) {
         Status = EFI_END_OF_FILE;
         goto ReadFile__clean_up_and_exit;
     }
 
     /* Stage the buffer in memory. */
-    Status = uefi_call_wrapper(BS->AllocatePool, 3, AllocatedMemoryType, *LoadedFileSize, &Buffer);
+    Status = uefi_call_wrapper(BS->AllocatePool, 3, AllocatedMemoryType, *LoadedFileSize, (VOID **)&Buffer);
     if (EFI_ERROR(Status) || NULL == Buffer) {
         Status = EFI_OUT_OF_RESOURCES;
         goto ReadFile__clean_up_and_exit;
@@ -125,7 +125,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
     }
 
     /* Now scroll along the length of the file, reading chunks into memory. */
-    for (UINTN i = 0; i < *LoadedFileSize; i += (1 << 12)) {
+    for (UINTN i = 0; i < *LoadedFileSize; i += ChunkReadSize) {
         /* The loop should never repeat with a 0-valued ChunkReadSize. */
         if (0 == ChunkReadSize) return EFI_END_OF_FILE;
 
@@ -133,7 +133,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
             LoadedFileHandle->Read, 3,
             LoadedFileHandle,
             &ChunkReadSize,
-            (Buffer + i)
+            (VOID *)((EFI_PHYSICAL_ADDRESS)Buffer + i)
         );
 
         if (EFI_ERROR(Status)) {

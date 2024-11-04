@@ -74,6 +74,7 @@ ReadKey(OUT EFI_KEY_DATA *KeyData,
         break;
     }
 
+    uefi_call_wrapper(STIEP->Reset, 2, STIEP, FALSE);
     goto ReadKey__Success;
 
 ReadKey__Fallback:
@@ -108,11 +109,10 @@ ReadKey__Fallback:
 
     /* Indicate that the fallback method was used to gather input. */
     KeyData->KeyState.KeyShiftState = READKEY_FALLBACK_INDICATOR;
-
-ReadKey__Success:
     uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
 
-    if (TimeoutMilliseconds > 0 && !!InputEvents[1]) {
+ReadKey__Success:
+    if (TimeoutMilliseconds > 0 && 0 != InputEvents[1]) {
         uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
     }
 

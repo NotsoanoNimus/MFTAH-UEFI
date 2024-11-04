@@ -12,6 +12,7 @@ TextModeInit(IN CONFIGURATION *c)
 EFI_STATUS
 TextModeDestroy(VOID)
 {
+    // TODO! Basically all of TEXT mode
 }
 
 

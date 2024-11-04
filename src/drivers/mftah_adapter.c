@@ -125,14 +125,16 @@ EFIAPI
 MftahInit(VOID)
 {
     mftah_status_t MftahStatus = MFTAH_SUCCESS;
-    EFI_STATUS Status = EFI_SUCCESS;
+
+    if (NULL != MFTAH) {
+        return EFI_SUCCESS;
+    }
 
     DPRINTLN("Loading and registering a new MFTAH protocol instance.");
     MFTAH = (mftah_protocol_t *)AllocateZeroPool(sizeof(mftah_protocol_t));
     MftahStatus = mftah_protocol_factory__create(MFTAH);
     if (MFTAH_ERROR(MftahStatus)) {
-        Status = EFI_NOT_STARTED;
-        PANIC("Failed to create a MFTAH protocol instance.");
+        return EFI_NOT_STARTED;
     }
 
     mftah_registration_details_t *HooksRegistration = (mftah_registration_details_t *)
@@ -151,9 +153,12 @@ MftahInit(VOID)
     MftahStatus = MFTAH->register_hooks(MFTAH, HooksRegistration);
     FreePool(HooksRegistration);
 
+    if (MFTAH_ERROR((MftahStatus))) {
+        return EFI_NOT_READY;
+    }
+
     return EFI_SUCCESS;
 }
-
 
 
 mftah_protocol_t *
@@ -161,4 +166,15 @@ EFIAPI
 MftahGetInstance(VOID)
 {
     return MFTAH;
+}
+
+
+VOID
+EFIAPI
+MftahDestroy(VOID)
+{
+    if (NULL != MFTAH) {
+        FreePool(MFTAH);
+        MFTAH = NULL;
+    }
 }

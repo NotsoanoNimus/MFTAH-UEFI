@@ -104,7 +104,9 @@ DECL_HANDLER(payload);
 DECL_HANDLER(target);
 DECL_HANDLER(now);
 DECL_HANDLER(type);
+DECL_HANDLER(subtype);
 DECL_HANDLER(mftah);
+DECL_HANDLER(mftahkey);
 DECL_HANDLER(default);
 
 
@@ -134,7 +136,9 @@ CONST CONFIG_HANDLER_TUPLE ConfigHandlers[] = {
     DECL_TUPLE(target),
     DECL_TUPLE(now),
     DECL_TUPLE(type),
+    DECL_TUPLE(subtype),
     DECL_TUPLE(mftah),
+    DECL_TUPLE(mftahkey),
     DECL_TUPLE(default),
     { NULL, NULL }   /* Terminal NULL entry marks end of list. */
 };
@@ -466,7 +470,7 @@ ConfigDestroyChain(CONFIG_CHAIN_BLOCK *c)
 CONFIGURATION *
 ConfigGet(VOID)
 {
-    CONFIGURATION *copy = (CONFIGURATION *)AllocatePool(sizeof(CONFIGURATION));
+    CONFIGURATION *copy = (CONFIGURATION *)AllocateZeroPool(sizeof(CONFIGURATION));
 
     if (NULL == copy) return NULL;
     
@@ -523,8 +527,8 @@ ConfigDumpChain(IN CONFIG_CHAIN_BLOCK *Chain,
     AsciiSPrint(
         (*ToBuffer), 512,
         "Chain '%a':\n   payload(%a),\n   target(%a),\n   type(%u),  flags(%1u:%1u:%1u:%1u)",
-        Chain->Name, Chain->PayloadPath, Chain->TargetPath,
-        Chain->Type, Chain->IsMFTAH, 0, Chain->IsDefault, Chain->IsImmediate
+        Chain->Name, Chain->PayloadPath, Chain->TargetPath, Chain->Type,
+        Chain->IsMFTAH, 0, Chain->IsDefault, Chain->IsImmediate
     );
 }
 
@@ -1055,6 +1059,34 @@ DECL_HANDLER(type)
 }
 
 
+DECL_HANDLER(subtype)
+{
+    if (!IsWithinChain) {
+        ErrorMsg = HackeneyedChainOnlyStr;
+        return EFI_INVALID_PARAMETER;
+    }
+
+    /* NOTE: sub-types cannot be ramdisks */
+    if (AsciiStrLen(Data) >= 3 && 0 == CompareMem(Data, "exe", 3)) {
+        Configuration.Chains[Configuration.ChainsLength]->SubType = EXE;
+    }
+    else if (AsciiStrLen(Data) >= 3 && 0 == CompareMem(Data, "elf", 3)) {
+        Configuration.Chains[Configuration.ChainsLength]->SubType = ELF;
+    }
+    else if (AsciiStrLen(Data) >= 3 && 0 == CompareMem(Data, "bin", 3)) {
+        Configuration.Chains[Configuration.ChainsLength]->SubType = BIN;
+    }
+    else {
+        ErrorMsg = L"Invalid Chain sub-type";
+        return EFI_INVALID_PARAMETER;
+    }
+
+    DPRINTLN("SUBTYPE SET FOR CHAIN");
+
+    return EFI_SUCCESS;
+}
+
+
 DECL_HANDLER(mftah)
 {
     if (!IsWithinChain) {
@@ -1065,6 +1097,29 @@ DECL_HANDLER(mftah)
     Configuration.Chains[Configuration.ChainsLength]->IsMFTAH
         = !!AsciiAtoi((CONST CHAR8 *)Data);
     DPRINTLN("MFTAH SET FOR CHAIN");
+
+    return EFI_SUCCESS;
+}
+
+
+DECL_HANDLER(mftahkey)
+{
+    if (!IsWithinChain) {
+        ErrorMsg = HackeneyedChainOnlyStr;
+        return EFI_INVALID_PARAMETER;
+    }
+
+    UINTN Len = AsciiStrLen((CONST CHAR8 *)Data);
+
+    CHAR8 *key = (CHAR8 *)AllocateZeroPool(Len + 1);
+    if (NULL == key) {
+        ErrorMsg = L"Failed to copy `mftahkey` text: out of resources";
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    CopyMem(key, Data, Len);
+    Configuration.Chains[Configuration.ChainsLength]->TargetPath = key;
+    DPRINTLN("MFTAHKEY ALLOCATED AND SET.");
 
     return EFI_SUCCESS;
 }

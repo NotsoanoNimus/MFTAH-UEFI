@@ -166,6 +166,7 @@ MenuLoop__Main:
 
     if (EFI_ERROR(Status) && EFI_TIMEOUT != Status) {
         GPrint("Unknown keyboard input failure.", FB->BLT, 20, 20, 0xFFFF0000, 0, FALSE, 2);
+        FB->Flush(FB);
         uefi_call_wrapper(BS->Stall, 1, 3000000);
 
         Status = EFI_DEVICE_ERROR;

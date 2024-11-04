@@ -28,7 +28,9 @@ struct {
     CHAR8       *Name;
     CHAR8       *PayloadPath;
     CHAR8       *TargetPath;   /* Inner EFI to chainload (for MFTAH_DISK types). */
+    CHAR8       *MFTAHKey;   /* Prefilled password (or filled by prompt). */
     CHAIN_TYPE  Type;
+    CHAIN_TYPE  SubType;
     BOOLEAN     IsMFTAH;
     BOOLEAN     IsCompressed;
     BOOLEAN     IsImmediate;

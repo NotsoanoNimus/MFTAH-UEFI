@@ -30,6 +30,8 @@
 #define _PACKED  __attribute__((packed))
 #define CHAR char
 #define INLINE inline
+#define c8 (CHAR8)
+#define c8p (CHAR8 *)
 
 /* Various IDs for ACPI entries inserted at runtime. */
 #define MFTAH_CREATOR_ID    EFI_SIGNATURE_32('X', 'M', 'I', 'T')   /* Creator: 'XMIT' */
@@ -244,7 +246,6 @@ STATIC CONST
 CHAR16 *
 MftahAsciiArt =
     L"\r\n"
-    L"\r\n"
     L"        M. F. T. A. H.\r\n"
     L"                                           ████████\r\n"
     L"        Media For Tamper-Averse Humans  ███        ████\r\n"
@@ -259,7 +260,6 @@ MftahAsciiArt =
     L"       ██                              ███             ██\r\n"
     L"        ██                   ████         ████      ███\r\n"
     L"          ███████████████████                 ██████\r\n"
-    L"\r\n"
     L"\r\n"
 ;
 

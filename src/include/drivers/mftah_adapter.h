@@ -26,5 +26,15 @@ EFIAPI
 MftahGetInstance(VOID);
 
 
+/**
+ * Destroy the current MFTAH protocol instance.
+ *
+ * @returns Nothing.
+ */
+VOID
+EFIAPI
+MftahDestroy(VOID);
+
+
 
 #endif   /* MFTAH_ADAPTER_H */

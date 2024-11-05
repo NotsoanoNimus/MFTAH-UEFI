@@ -38,23 +38,6 @@ STATIC CONST CHAR *mTableNames[68];
 
 
 STATIC
-VOID
-EFIAPI
-ChecksumTable(EFI_ACPI_DESCRIPTION_HEADER *sdt)
-{
-    uint32_t sum = 0;
-
-    sdt->Checksum = 0;
-
-    for (uint32_t i = 0; i < sdt->Length; ++i) {
-        sum += *(uint8_t *)((uintptr_t)sdt + i);
-    }
-
-    sdt->Checksum = (uint8_t)(0x100 - (sum % 0x100));
-}
-
-
-STATIC
 EFI_STATUS
 EFIAPI
 InstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
@@ -160,8 +143,8 @@ InstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
     xsdt->Length += sizeof(VOID *);
 
     /* We're nice and we'll double-check the checksum for them. :) */
-    ChecksumTable(NewHandle);
-    ChecksumTable(xsdt);   /* This is a MUST. */
+    AcpiChecksumTable(NewHandle);
+    AcpiChecksumTable(xsdt);   /* This is a MUST. */
 
     /* Update the index of tracked installed tables. */
     *TableKey = mKeyedTablesIndex;
@@ -208,7 +191,7 @@ UninstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
 
     FreePool(TargetPointer);
 
-    ChecksumTable(xsdt);
+    AcpiChecksumTable(xsdt);
 
     mKeyedTables[mKeyedTablesIndex] = 0;
     --mKeyedTablesIndex;
@@ -284,6 +267,22 @@ AcpiProtocolCheck(VOID)
     return (NULL == mAcpiTableProtocol)
         ? EFI_NOT_FOUND
         : Status;
+}
+
+
+VOID
+EFIAPI
+AcpiChecksumTable(IN EFI_ACPI_DESCRIPTION_HEADER *sdt)
+{
+    uint32_t sum = 0;
+
+    sdt->Checksum = 0;
+
+    for (uint32_t i = 0; i < sdt->Length; ++i) {
+        sum += *(uint8_t *)((uintptr_t)sdt + i);
+    }
+
+    sdt->Checksum = (uint8_t)(0x100 - (sum % 0x100));
 }
 
 

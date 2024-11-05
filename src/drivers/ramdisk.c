@@ -1,5 +1,6 @@
 #include "../include/drivers/ramdisk.h"
 
+#include "../include/drivers/acpi.h"
 #include "../include/drivers/nfit.h"
 
 
@@ -14,22 +15,21 @@ EFI_GUID gEfiRamdiskPersistentVirtualCdGuid = EFI_PERSISTENT_VIRTUAL_CD_GUID;
 
 
 /* Handle for the EFI_RAM_DISK_PROTOCOL instance. */
-static
 EFI_RAM_DISK_PROTOCOL
-mRamDiskProtocol = {
+RAMDISK = {
     RamDiskRegister,
     RamDiskUnregister,
 };
 
 
-static
+STATIC
 RAMDISK_PRIVATE_DATA
 mRamDiskPrivateDataTemplate = {
     RAMDISK_PRIVATE_DATA_SIGNATURE,
     NULL
 };
 
-static
+STATIC
 MEDIA_RAMDISK_DEVICE_PATH
 mRamDiskDeviceNodeTemplate = {
     {
@@ -42,7 +42,7 @@ mRamDiskDeviceNodeTemplate = {
     }
 };
 
-static
+STATIC
 EFI_BLOCK_IO_PROTOCOL
 mRamDiskBlockIoTemplate = {
     EFI_BLOCK_IO_PROTOCOL_REVISION,
@@ -53,11 +53,9 @@ mRamDiskBlockIoTemplate = {
     RamDiskBlkIoFlushBlocks
 };
 
-//
-// The EFI_BLOCK_IO_PROTOCOL2 instances that is installed onto the handle
-// for newly registered RAM disks
-//
-static
+/* The EFI_BLOCK_IO_PROTOCOL2 instance that is installed onto
+    the handle for newly registered RAM disks. */
+STATIC
 EFI_BLOCK_IO2_PROTOCOL
 mRamDiskBlockIo2Template = {
     (EFI_BLOCK_IO_MEDIA *) 0,
@@ -70,48 +68,29 @@ mRamDiskBlockIo2Template = {
 
 
 /**
- * Publish the SSDT table containing a root NVDIMM device.
+ * Publish the SSDT table containing a root NVDIMM device. This assumes
+ *  the presence of an NVDIMM Root Device has already been checked.
  * 
  * @returns Whether the operation succeeded.
  */
-static
+STATIC
 EFI_STATUS
-RamDiskPublishSsdt()
+RamDiskPublishSsdt(VOID)
 {
-    EFI_STATUS Status = EFI_SUCCESS;
-    UINTN DummySsdtTableKey = 0;
+    EFI_STATUS Status;
+    UINTN DummySsdtTableKey = 0;   /* don't care about preserving this returned value */
 
-    /* An empty NVDIMM Root Device SSDT entry. Inserted only if 
-          an existing NVDIMM Root Device is not already found. */
-    UINT8 nvdimmRootAml[0x7C] = {0};
+    EXTERN unsigned char NvdimmRootAml;
+    EXTERN unsigned int NvdimmRootAmlLength;
 
-    DPRINTLN(L"-- Publishing RamDisk SSDT entry for ACPI.");
-    MEMDUMP(nvdimmRootAml, sizeof(nvdimmRootAml));
-    DPRINTLN(L"");
+    EFI_ACPI_TABLE_PROTOCOL *ACPI = AcpiGetInstance();
+    if (NULL == ACPI) return EFI_DEVICE_ERROR;
 
-    /*
-     * Install an SSDT entry for the ACPI table using some compiled AML.
-     *   The AML comes from the RamDisk.asl file in the local folder.
-     *   This is compiled on Linux using the 'iasl' tool and the resultant
-     *   bytecode is placed in a static C variable above (nvdimmRootAml).
-     * 
-     * Compilation Command/Macro:
-     *    iasl RamDisk.asl && echo && \
-     *       T="$(xxd -p RamDisk.aml | tr -d '\n' | sed -r 's/(..)/0x\1, /g')" && echo && \
-     *       echo "$T" | sed -r "s/((0x..,\s){8})/\1\r\n/g"
-     * 
-     * This code assumes that the "RamDisk " SSDT is NOT already installed
-     *   at boot.
-     */
-    Status = uefi_call_wrapper(
-        gAcpiTableProtocol->InstallAcpiTable,
-        4,
-        gAcpiTableProtocol,
-        nvdimmRootAml,
-        sizeof(nvdimmRootAml),
-        &DummySsdtTableKey
-    );
-
+    Status = uefi_call_wrapper(ACPI->InstallAcpiTable, 4,
+                               ACPI,
+                               (VOID *)&NvdimmRootAml,
+                               NvdimmRootAmlLength,
+                               &DummySsdtTableKey);
     return Status;
 }
 
@@ -123,165 +102,79 @@ RamDiskPublishSsdt()
  * 
  * @returns Whether the publishing operation succeeded.
  */
-static
+STATIC
 EFI_STATUS
 RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
 {
     EFI_STATUS Status = EFI_SUCCESS;
-    EFI_MEMORY_DESCRIPTOR *MemoryMap;
-    EFI_MEMORY_DESCRIPTOR *MemoryMapEntry;
-    EFI_MEMORY_DESCRIPTOR *MemoryMapEnd;
-    UINTN MemoryMapSize; 
-    UINTN TableIndex;
-    VOID *TableHeader;
-    EFI_ACPI_TABLE_VERSION TableVersion;
+    EFI_ACPI_TABLE_PROTOCOL *ACPI;
     UINTN TableKey;
     EFI_ACPI_DESCRIPTION_HEADER *NfitHeader;
-    EFI_ACPI_6_4_NFIT_SYSTEM_PHYSICAL_ADDRESS_RANGE_STRUCTURE *SpaRange;
+    EFI_ACPI_NFIT_SPA_STRUCTURE *SpaRange;
     VOID *Nfit;
     UINT32 NfitLen;
-    UINTN MapKey;
-    UINTN DescriptorSize;
-    UINT32 DescriptorVersion;
-    UINT64 CurrentData;
-    UINT8 Checksum;
-    BOOLEAN MemoryFound;
 
-    MemoryMapSize = 0;
-    MemoryMap = NULL;
-    MemoryFound = FALSE;
-
-    Status = uefi_call_wrapper(
-        BS->GetMemoryMap,
-        5,
-        &MemoryMapSize,
-        MemoryMap,
-        &MapKey,
-        &DescriptorSize,
-        &DescriptorVersion
-    );
-
-    ASSERT(EFI_BUFFER_TOO_SMALL == Status);
-    
-    if (NULL == gAcpiTableProtocol) {
-        return EFI_NOT_FOUND;
-    }
-
-    do {
-        MemoryMap = (EFI_MEMORY_DESCRIPTOR *)AllocatePool(MemoryMapSize);
-        if (NULL == MemoryMap) {
-            return EFI_OUT_OF_RESOURCES;
-        }
-
-        Status = uefi_call_wrapper(
-            BS->GetMemoryMap,
-            5,
-            &MemoryMapSize,
-            MemoryMap,
-            &MapKey,
-            &DescriptorSize,
-            &DescriptorVersion
-        );
-        
-        if (EFI_ERROR(Status)) {
-            FreePool(MemoryMap);
-        }
-    } while (EFI_BUFFER_TOO_SMALL == Status);
-
-    if (EFI_ERROR(Status)) {
-        return Status;
-    }
-
-    MemoryMapEntry = MemoryMap;
-    MemoryMapEnd = (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)MemoryMap + MemoryMapSize);
-
-    while ((UINTN)MemoryMapEntry < (UINTN)MemoryMapEnd) {
-        if (//(MemoryMapEntry->Type == EfiReservedMemoryType)
-            (MemoryMapEntry->PhysicalStart <= PrivateData->StartingAddr)
-            && (
-                MemoryMapEntry->PhysicalStart + MultU64x32(MemoryMapEntry->NumberOfPages, EFI_PAGE_SIZE)
-                    >= PrivateData->StartingAddr + PrivateData->Size
-            )
-        ) {
-            MemoryFound = TRUE;
-            break;
-        }
-
-        MemoryMapEntry = (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)MemoryMapEntry + DescriptorSize);
-    }
-
-    FreePool(MemoryMap);
-
-    if (!MemoryFound) {
-        PRINTLN(L"Could not find the BootServices memory map.");
+    ACPI = AcpiGetInstance();
+    if (NULL == ACPI) {
         return EFI_NOT_FOUND;
     }
 
     /* Assume that if no NFIT is in the ACPI table, then there is no NVDIMM 
           device in the \SB scope. So report one via the SSDT. */
+    /* TODO! Determine if one exists already and append the SPA. */
     ERRCHECK(RamDiskPublishSsdt());
 
-    /* TODO! Determine if one exists already and append the SPA. */
-    DPRINTLN(L"\r\nRamDiskPublishNfit: No NFIT is in the ACPI Table, will create one.");
-
-    NfitLen = 40 + 56;// + 48;
-            //sizeof(EFI_ACPI_6_1_NVDIMM_FIRMWARE_INTERFACE_TABLE) +
-            //sizeof(EFI_ACPI_6_1_NFIT_SYSTEM_PHYSICAL_ADDRESS_RANGE_STRUCTURE) +
-            //sizeof(EFI_ACPI_6_1_NFIT_REGION_MAPPING_STRUCTURE);
+    NfitLen = sizeof(EFI_ACPI_SDT_NFIT) + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
     Nfit = AllocateZeroPool(NfitLen);
     if (NULL == Nfit) {
         return EFI_OUT_OF_RESOURCES;
     }
 
-    SpaRange = (EFI_ACPI_6_4_NFIT_SYSTEM_PHYSICAL_ADDRESS_RANGE_STRUCTURE *)
-               ((UINT8 *)Nfit + 40);
+    SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)
+        ((EFI_PHYSICAL_ADDRESS)Nfit + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE));
 
     UINT8 PcdAcpiDefaultOemId[6] = { 'X', 'M', 'I', 'T', ' ', ' ' };
 
     NfitHeader                  = (EFI_ACPI_DESCRIPTION_HEADER *)Nfit;
     NfitHeader->Signature       = EFI_ACPI_NFIT_SIGNATURE;
     NfitHeader->Length          = NfitLen;
-    NfitHeader->Revision        = EFI_ACPI_6_4_NVDIMM_FIRMWARE_INTERFACE_TABLE_REVISION;
+    NfitHeader->Revision        = EFI_ACPI_NFIT_REVISION;
     NfitHeader->OemRevision     = MFTAH_RELEASE_DATE;   /* OEM Revision by some MFTAH release date. */
     NfitHeader->CreatorId       = MFTAH_CREATOR_ID;
     NfitHeader->CreatorRevision = 0x1;   /* Should always be 1. */
     NfitHeader->OemTableId      = MFTAH_OEM_TABLE_ID;
-    CopyMem(NfitHeader->OemId, &PcdAcpiDefaultOemId[0], sizeof(NfitHeader->OemId));
+    CopyMem(NfitHeader->OemId, PcdAcpiDefaultOemId, sizeof(NfitHeader->OemId));
 
     /* Fill in the content of the SPA Range Structure. */
-    SpaRange->Type                             = EFI_ACPI_6_4_NFIT_SYSTEM_PHYSICAL_ADDRESS_RANGE_STRUCTURE_TYPE;
-    SpaRange->Length                           = sizeof(EFI_ACPI_6_4_NFIT_SYSTEM_PHYSICAL_ADDRESS_RANGE_STRUCTURE);
+    SpaRange->Type                             = NFIT_TABLE_TYPE_SPA;
+    SpaRange->Length                           = sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
     SpaRange->SystemPhysicalAddressRangeBase   = PrivateData->StartingAddr;
     SpaRange->SystemPhysicalAddressRangeLength = PrivateData->Size;
     CopyMem(&SpaRange->AddressRangeTypeGUID, &PrivateData->TypeGuid, sizeof(EFI_GUID));
 
     /* Finally, calculate the checksum of the NFIT table. */
-    NfitHeader->Checksum = CalculateCheckSum8((UINT8 *)Nfit, NfitHeader->Length);
+    AcpiChecksumTable((EFI_ACPI_DESCRIPTION_HEADER *)Nfit);
 
     /* Publish the NFIT to the ACPI table. */
-    Status = uefi_call_wrapper(
-        gAcpiTableProtocol->InstallAcpiTable,
-        4,
-        gAcpiTableProtocol,
-        Nfit,
-        NfitHeader->Length,
-        &TableKey
-    );
+    Status = uefi_call_wrapper(ACPI->InstallAcpiTable, 4,
+                               ACPI,
+                               Nfit,
+                               NfitHeader->Length,
+                               &TableKey);
 
     FreePool(Nfit);
-
     return Status;
 }
 
 
 /**
- * Initialize the RAM disk device node.
+ * Initialize the ramdisk device node.
  *
  * @param[in]      PrivateData     Points to RAM disk private data.
  * @param[in, out] RamDiskDevNode  Points to the RAM disk device node.
  *
  */
-static
+STATIC
 VOID
 RamDiskInitDeviceNode(IN RAMDISK_PRIVATE_DATA *PrivateData,
                       IN OUT MEDIA_RAMDISK_DEVICE_PATH *RamDiskDevNode)
@@ -297,9 +190,6 @@ RamDiskInitDeviceNode(IN RAMDISK_PRIVATE_DATA *PrivateData,
     CopyMem(&RamDiskDevNode->TypeGuid,
             &PrivateData->TypeGuid,
             sizeof(EFI_GUID));
-
-    ASSERT(*((UINT64 *)&RamDiskDevNode->TypeGuid) == *((UINT64 *)&PrivateData->TypeGuid));
-    ASSERT(*((UINT64 *)&(RamDiskDevNode->TypeGuid.Data4[0])) == *((UINT64 *)&(PrivateData->TypeGuid.Data4[0])));
 
     RamDiskDevNode->Instance = PrivateData->InstanceNumber;
 }
@@ -320,17 +210,15 @@ RamDiskRegister(IN UINT64 RamDiskBase,
     UINTN                           DevicePathSizeInt;
     LIST_ENTRY                      *Entry;
 
-    DPRINT(L"REGISTER ");
-
     if ((0 == RamDiskSize) || (NULL == RamDiskType) || (NULL == DevicePath)) {
-        PRINTLN(L"\r\nNo ramdisk or ramdisk device path was found.");
+        EFI_DANGERLN("\r\nNo ramdisk or ramdisk device path was found.");
         return EFI_NOT_FOUND;
     }
 
     /* Add a check to prevent data read across the memory boundary. */
     if (0 != (RamDiskSize % RAM_DISK_BLOCK_SIZE)) {
-        PRINTLN(
-            L"\r\nThe ramdisk size of '%d' is not a multiple of block size '%d' (R: %d).",
+        EFI_DANGERLN(
+            "\r\nThe ramdisk size of '%d' is not a multiple of block size '%d' (R: %d).",
             RamDiskSize,
             RAM_DISK_BLOCK_SIZE,
             (RamDiskSize % RAM_DISK_BLOCK_SIZE)
@@ -342,7 +230,7 @@ RamDiskRegister(IN UINT64 RamDiskBase,
         RamDiskSize >= UINT64_MAX
         || RamDiskBase > ((UINT64_MAX - RamDiskSize) + 1)
     ) {
-        PRINTLN(L"\r\nThe ramdisk is misaligned or exceeds 64-bit memory boundaries.");
+        EFI_DANGERLN("\r\nThe ramdisk is misaligned or exceeds 64-bit memory boundaries.");
         return EFI_INVALID_PARAMETER;
     }
 
@@ -360,88 +248,53 @@ RamDiskRegister(IN UINT64 RamDiskBase,
     PrivateData->Size         = RamDiskSize;
 
     /* Generate device path information for the ramdisk. */
-    DPRINT(L"ALLOC2 ");
     RamDiskDevNode = (MEDIA_RAMDISK_DEVICE_PATH *)AllocateZeroPool(sizeof(MEDIA_RAMDISK_DEVICE_PATH));
     if (NULL == RamDiskDevNode) {
         Status = EFI_OUT_OF_RESOURCES;
         goto ErrorExit;
     }
-    DPRINT(L"COPY2 ");
-    CopyMem(RamDiskDevNode, &mRamDiskDeviceNodeTemplate, sizeof(MEDIA_RAMDISK_DEVICE_PATH));
 
-    DPRINT(L"D_INIT ");
+    CopyMem(RamDiskDevNode, &mRamDiskDeviceNodeTemplate, sizeof(MEDIA_RAMDISK_DEVICE_PATH));
     RamDiskInitDeviceNode(PrivateData, RamDiskDevNode);
 
-    DPRINT(L"\r\n");
-    MEMDUMP(&mRamDiskDeviceNodeTemplate, sizeof(MEDIA_RAMDISK_DEVICE_PATH));
-    DPRINT(L"\r\n");
-
-    DPRINT(L"D_APPEND ");
     *DevicePath = AppendDevicePathNode(ParentDevicePath,
-                                       (EFI_DEVICE_PATH_PROTOCOL *) RamDiskDevNode);
+                                       (EFI_DEVICE_PATH_PROTOCOL *)RamDiskDevNode);
     if (NULL == *DevicePath) {
         Status = EFI_OUT_OF_RESOURCES;
         goto ErrorExit;
     }
 
-    CHAR16 *v = DevicePathToStr(*DevicePath);
-    DPRINT(L"\r\n %s\r\n", v);
-    MEMDUMP(*DevicePath, 64);
-    DPRINT(L"\r\n");
-    FreePool(v);
-
     PrivateData->DevicePath = *DevicePath;
 
     /* Fill Block IO protocol informations for the ramdisk. */
-    DPRINT(L"BLOCKIO ");
     RamDiskInitBlockIo(PrivateData);
 
     /* Install EFI_DEVICE_PATH_PROTOCOL & EFI_BLOCK_IO(2)_PROTOCOL on a new handle. */
-    DPRINT(L"PROTOINST ");
-    Status = uefi_call_wrapper(
-        BS->InstallMultipleProtocolInterfaces,
-        8,
-        &PrivateData->Handle,
-        &gEfiBlockIoProtocolGuid,
-        &PrivateData->BlockIo,
-        &gEfiBlockIo2ProtocolGuid,
-        &PrivateData->BlockIo2,
-        &gEfiDevicePathProtocolGuid,
-        PrivateData->DevicePath,
-        NULL
-    );
+    Status = uefi_call_wrapper(BS->InstallMultipleProtocolInterfaces, 8,
+                               &PrivateData->Handle,
+                               &gEfiBlockIoProtocolGuid,
+                               &PrivateData->BlockIo,
+                               &gEfiBlockIo2ProtocolGuid,
+                               &PrivateData->BlockIo2,
+                               &gEfiDevicePathProtocolGuid,
+                               PrivateData->DevicePath,
+                               NULL);
     if (EFI_ERROR(Status)) {
         goto ErrorExit;
     }
 
-    DPRINT(L"CONNECTCONTROLLER(%016x) ", PrivateData->Handle);
-    Status = uefi_call_wrapper(
-        BS->ConnectController,
-        4,
-        PrivateData->Handle,
-        NULL,
-        NULL,
-        TRUE
-    );
+    Status = uefi_call_wrapper(BS->ConnectController, 4,
+                               PrivateData->Handle,
+                               NULL,
+                               NULL,
+                               TRUE);
     if (EFI_ERROR(Status)) {
         goto ErrorExit;
     }
-
-    DPRINT(
-        L"\r\n\tPDH(%p) PDBH(%p) PDB2H(%p) MEDIA(%08x) ",
-        PrivateData->Handle,
-        PrivateData->BlockIo,
-        PrivateData->BlockIo2,
-        PrivateData->Media.MediaId
-    );
 
     FreePool(RamDiskDevNode);
 
-    if (NULL != gAcpiTableProtocol) {
-        ERRCHECK(RamDiskPublishNfit(PrivateData));
-    } else {
-        PANIC(L"Cannot register ramdisk in ACPI NVDIMM Firmware Interface Table (NFIT).");
-    }
+    ERRCHECK(RamDiskPublishNfit(PrivateData));
 
     return EFI_SUCCESS;
 
@@ -472,13 +325,10 @@ RamDiskUnregister(IN EFI_DEVICE_PATH_PROTOCOL *DevicePath)
         return EFI_INVALID_PARAMETER;
     }
 
-    uefi_call_wrapper(
-        BS->UninstallMultipleProtocolInterfaces,
-        3,
-        DevicePath,
-        &gEfiRamdiskGuid,
-        NULL
-    );   
+    uefi_call_wrapper(BS->UninstallMultipleProtocolInterfaces, 3,
+                      DevicePath,
+                      &gEfiRamdiskGuid,
+                      NULL);
 
     return EFI_SUCCESS;
 }
@@ -486,41 +336,13 @@ RamDiskUnregister(IN EFI_DEVICE_PATH_PROTOCOL *DevicePath)
 
 EFI_STATUS
 EFIAPI
-RDEntryPoint(IN EFI_HANDLE ImageHandle,
-             IN EFI_SYSTEM_TABLE *SystemTable)
+RamdiskDriverInit(IN EFI_HANDLE ImageHandle)
 {
-    EFI_STATUS                      Status;
-    UINT64                          *StartingAddr;
-    EFI_DEVICE_PATH_PROTOCOL        *DevicePath;
-    VOID                            *DummyInterface = NULL;
-
-    /* This check is no longer done because the application should use its own RD driver. */
-    // Status = uefi_call_wrapper(
-    //     BS->LocateProtocol,
-    //     3,
-    //     &gEfiRamdiskGuid,
-    //     NULL,
-    //     &DummyInterface
-    // );
-    // if (!EFI_ERROR(Status)) {
-    //     Print(L"-- A ramdisk driver already exists in the protocol database.\r\n");
-    //     return EFI_ALREADY_STARTED;
-    // }
-
-    Status = uefi_call_wrapper(
-        BS->InstallMultipleProtocolInterfaces,
-        4,
-        &ImageHandle,
-        &gEfiRamdiskGuid,
-        &mRamDiskProtocol,
-        NULL
-    );
-    if (EFI_ERROR(Status)) {
-        PRINTLN(L"-- Could not register protocol ID for ImageHandle.");
-        return EFI_INVALID_PARAMETER;
-    }
-
-    return EFI_SUCCESS;
+    return uefi_call_wrapper(BS->InstallMultipleProtocolInterfaces, 4,
+                             &ImageHandle,
+                             &gEfiRamdiskGuid,
+                             &RAMDISK,
+                             NULL);
 }
 
 
@@ -547,23 +369,9 @@ RamDiskInitBlockIo(IN RAMDISK_PRIVATE_DATA *PrivateData)
     Media->ReadOnly         = FALSE;
     Media->WriteCaching     = FALSE;
     Media->BlockSize        = RAM_DISK_BLOCK_SIZE;
-    Media->LastBlock        = DivU64x32(
-                                  PrivateData->Size + RAM_DISK_BLOCK_SIZE - 1,
-                                  RAM_DISK_BLOCK_SIZE,
-                                  NULL
-                              ) - 1;
-
-    // Undefined behavior is produced by the 'for' loop below. And I have no idea why...
-    //     Print(L"BlockSize (%d); LastBlock (%d); Remainder (%d)  ", Media->BlockSize, Media->LastBlock, Remainder);
-    //   for (int i = 0; ; ++i) {
-    //     Media->LastBlock = DivU64x32(PrivateData->Size, RAM_DISK_BLOCK_SIZE >> i, &Remainder) - 1;
-    //     if (0 == Remainder || 0 == Media->BlockSize >> i) break;
-
-    //     Media->BlockSize = RAM_DISK_BLOCK_SIZE >> i;
-    //   }
-    //     Print(L"BlockSize (%d); LastBlock (%d); Remainder (%d)  ", Media->BlockSize, Media->LastBlock, Remainder);
-
-    //   ASSERT(Media->BlockSize != 0);
+    Media->LastBlock        = DivU64x32((PrivateData->Size + RAM_DISK_BLOCK_SIZE - 1),
+                                        RAM_DISK_BLOCK_SIZE,
+                                        NULL) - 1;
 }
 
 
@@ -587,7 +395,7 @@ RamDiskBlkIoReadBlocks(IN EFI_BLOCK_IO_PROTOCOL *This,
     RAMDISK_PRIVATE_DATA *PrivateData;
     UINTN NumberOfBlocks;
 
-    PrivateData = RAM_DISK_PRIVATE_FROM_BLKIO (This);
+    PrivateData = RAM_DISK_PRIVATE_FROM_BLKIO(This);
 
     if (MediaId != PrivateData->Media.MediaId) {
         return EFI_MEDIA_CHANGED;
@@ -614,11 +422,9 @@ RamDiskBlkIoReadBlocks(IN EFI_BLOCK_IO_PROTOCOL *This,
         return EFI_INVALID_PARAMETER;
     }
 
-    CopyMem(
-        Buffer,
-        (VOID *)(UINTN)(PrivateData->StartingAddr + MultU64x32(Lba, PrivateData->Media.BlockSize)),
-        BufferSize
-    );
+    CopyMem(Buffer,
+            (VOID *)(UINTN)(PrivateData->StartingAddr + MultU64x32(Lba, PrivateData->Media.BlockSize)),
+            BufferSize);
 
     return EFI_SUCCESS;
 }
@@ -666,11 +472,9 @@ RamDiskBlkIoWriteBlocks(IN EFI_BLOCK_IO_PROTOCOL *This,
         return EFI_INVALID_PARAMETER;
     }
 
-    CopyMem(
-        (VOID *)(UINTN)(PrivateData->StartingAddr + MultU64x32(Lba, PrivateData->Media.BlockSize)),
-        Buffer,
-        BufferSize
-    );
+    CopyMem((VOID *)(UINTN)(PrivateData->StartingAddr + MultU64x32(Lba, PrivateData->Media.BlockSize)),
+            Buffer,
+            BufferSize);
 
     return EFI_SUCCESS;
 }
@@ -707,19 +511,17 @@ RamDiskBlkIo2ReadBlocksEx(IN EFI_BLOCK_IO2_PROTOCOL *This,
 
     PrivateData = RAM_DISK_PRIVATE_FROM_BLKIO2(This);
 
-    Status = RamDiskBlkIoReadBlocks(
-        &PrivateData->BlockIo,
-        MediaId,
-        Lba,
-        BufferSize,
-        Buffer
-    );
+    Status = RamDiskBlkIoReadBlocks(&PrivateData->BlockIo,
+                                    MediaId,
+                                    Lba,
+                                    BufferSize,
+                                    Buffer);
     if (EFI_ERROR(Status)) {
         return Status;
     }
 
     /* If the caller's event is given, signal it after the memory read completes. */
-    if ((Token != NULL) && (Token->Event != NULL)) {
+    if ((NULL != Token) && (NULL != Token->Event)) {
         Token->TransactionStatus = EFI_SUCCESS;
         uefi_call_wrapper(BS->SignalEvent, 1, Token->Event);
     }
@@ -742,19 +544,17 @@ RamDiskBlkIo2WriteBlocksEx(IN EFI_BLOCK_IO2_PROTOCOL *This,
 
     PrivateData = RAM_DISK_PRIVATE_FROM_BLKIO2(This);
 
-    Status = RamDiskBlkIoWriteBlocks(
-        &PrivateData->BlockIo,
-        MediaId,
-        Lba,
-        BufferSize,
-        Buffer
-    );
+    Status = RamDiskBlkIoWriteBlocks(&PrivateData->BlockIo,
+                                     MediaId,
+                                     Lba,
+                                     BufferSize,
+                                     Buffer);
     if (EFI_ERROR(Status)) {
         return Status;
     }
 
     /* If the caller's event is given, signal it after the memory write completes. */
-    if ((Token != NULL) && (Token->Event != NULL)) {
+    if ((NULL != Token) && (NULL != Token->Event)) {
         Token->TransactionStatus = EFI_SUCCESS;
         uefi_call_wrapper(BS->SignalEvent, 1, Token->Event);
     }
@@ -777,7 +577,7 @@ RamDiskBlkIo2FlushBlocksEx(IN EFI_BLOCK_IO2_PROTOCOL *This,
     }
 
     /* If the caller's event is given, signal it directly. */
-    if ((Token != NULL) && (Token->Event != NULL)) {
+    if ((NULL != Token) && (NULL != Token->Event)) {
         Token->TransactionStatus = EFI_SUCCESS;
         uefi_call_wrapper(BS->SignalEvent, 1, Token->Event);
     }

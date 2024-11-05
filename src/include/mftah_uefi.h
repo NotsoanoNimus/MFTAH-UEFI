@@ -31,7 +31,6 @@
 #define CHAR char
 #define INLINE inline
 #define c8 (CHAR8)
-#define c8p (CHAR8 *)
 
 /* Various IDs for ACPI entries inserted at runtime. */
 #define MFTAH_CREATOR_ID    EFI_SIGNATURE_32('X', 'M', 'I', 'T')   /* Creator: 'XMIT' */
@@ -52,7 +51,7 @@
 #define MFTAH_MAX_FILENAME_LENGTH   64
 
 /* The chunk sizes at which the ramdisk is loaded. */
-#define MFTAH_RAMDISK_LOAD_BLOCK_SIZE   16384
+#define MFTAH_RAMDISK_LOAD_BLOCK_SIZE   (1 << 16)
 
 /* When set to 1, causes the application to PANIC if EFI variables
     hinting toward the loaded ramdisk's location cannot be set. */
@@ -224,8 +223,8 @@ PROGRESS_UPDATE_HOOK;
 static const CHAR16 *DefaultConfigFileName = L"\\EFI\\BOOT\\MFTAH.CFG";
 
 
-/* The Image Handle from EFI_MAIN, in case it's ever used in other modules. */
-extern EFI_HANDLE gImageHandle;
+/* The Image Handle from EFI_MAIN, in case it's ever used in other modules (hint: it is). */
+extern EFI_HANDLE ENTRY_HANDLE;
 
 /* The vendor GUID for XMIT XYZ. */
 extern EFI_GUID gXmitVendorGuid;

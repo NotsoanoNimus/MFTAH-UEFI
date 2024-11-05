@@ -41,7 +41,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
     EFI_FILE_PROTOCOL *VolumeHandle = NULL;
     EFI_FILE_PROTOCOL *LoadedFileHandle = NULL;
 
-    UINTN ChunkReadSize = (1 << 16);   /* 64 KiB */
+    UINTN ChunkReadSize = MFTAH_RAMDISK_LOAD_BLOCK_SIZE;   /* 64 KiB */
     UINT8 *Buffer = NULL;
 
     if (
@@ -71,7 +71,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
                                &gEfiSimpleFileSystemProtocolGuid,
                                (VOID **)&ImageIoHandle);
     if (EFI_ERROR(Status)) {
-        EFI_DANGERLN("   ~ Error initializing image I/O handle.");
+        EFI_DANGERLN("   ~ Error initializing SFS protocol handle.");
         return Status;
     }
 

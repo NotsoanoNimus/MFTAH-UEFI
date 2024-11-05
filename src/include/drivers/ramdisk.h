@@ -7,19 +7,15 @@
 
 #ifndef MFTAH_RAMDISK_H
 #define MFTAH_RAMDISK_H
-/* TODO: Serioulsy consider revising this file. */
 
 #include "../mftah_uefi.h"
-#include "../core/util.h"
-#include "acpi.h"
 
 
 #ifndef RAM_DISK_BLOCK_SIZE
-    #define RAM_DISK_BLOCK_SIZE 512
+#   define RAM_DISK_BLOCK_SIZE 512
 #endif
 
 #define MEDIA_RAM_DISK_DP 0x09
-
 
 /* Taken from UEFI spec: https://uefi.org/specs/UEFI/2.10/13_Protocols_Media_Access.html#ram-disk-protocol */
 #define EFI_RAM_DISK_PROTOCOL_GUID \
@@ -55,33 +51,33 @@
 typedef
 EFI_STATUS
 (EFIAPI *EFI_RAM_DISK_REGISTER_RAMDISK) (
-    IN UINT64                              RamDiskBase,
-    IN UINT64                              RamDiskSize,
-    IN EFI_GUID                            *RamDiskType,
-    IN EFI_DEVICE_PATH                     *ParentDevicePath OPTIONAL,
-    OUT EFI_DEVICE_PATH_PROTOCOL           **DevicePath
+    IN UINT64                               RamDiskBase,
+    IN UINT64                               RamDiskSize,
+    IN EFI_GUID                             *RamDiskType,
+    IN EFI_DEVICE_PATH                      *ParentDevicePath OPTIONAL,
+    OUT EFI_DEVICE_PATH_PROTOCOL            **DevicePath
 );
 
 typedef
 EFI_STATUS
 (EFIAPI *EFI_RAM_DISK_UNREGISTER_RAMDISK) (
-    IN EFI_DEVICE_PATH_PROTOCOL              *DevicePath
+    IN EFI_DEVICE_PATH_PROTOCOL             *DevicePath
 );
 
 typedef
 struct {
-    EFI_RAM_DISK_REGISTER_RAMDISK              Register;
-    EFI_RAM_DISK_UNREGISTER_RAMDISK            Unregister;
+    EFI_RAM_DISK_REGISTER_RAMDISK           Register;
+    EFI_RAM_DISK_UNREGISTER_RAMDISK         Unregister;
 } EFI_RAM_DISK_PROTOCOL;
 
 typedef
 struct {
-    EFI_DEVICE_PATH_PROTOCOL Header;
-    UINT32 StartingAddr[2];
-    UINT32 EndingAddr[2];
-    EFI_GUID TypeGuid;
-    UINT16 Instance;
-} __attribute__((packed)) MEDIA_RAMDISK_DEVICE_PATH;
+    EFI_DEVICE_PATH_PROTOCOL    Header;
+    UINT32                      StartingAddr[2];
+    UINT32                      EndingAddr[2];
+    EFI_GUID                    TypeGuid;
+    UINT16                      Instance;
+} _PACKED MEDIA_RAMDISK_DEVICE_PATH;
 
 typedef
 struct {
@@ -98,38 +94,35 @@ struct {
     UINT64                          Size;
     EFI_GUID                        TypeGuid;
     UINT16                          InstanceNumber;
-} __attribute__((packed)) RAMDISK_PRIVATE_DATA;
+} RAMDISK_PRIVATE_DATA;
 
 
-extern EFI_GUID gEfiRamdiskGuid;
-extern EFI_GUID gEfiRamdiskVirtualDiskGuid;
-extern EFI_GUID gEfiRamdiskVirtualCdGuid;
-extern EFI_GUID gEfiRamdiskPersistentVirtualDiskGuid;
-extern EFI_GUID gEfiRamdiskPersistentVirtualCdGuid;
+EXTERN EFI_GUID gEfiRamdiskGuid;
+EXTERN EFI_GUID gEfiRamdiskVirtualDiskGuid;
+EXTERN EFI_GUID gEfiRamdiskVirtualCdGuid;
+EXTERN EFI_GUID gEfiRamdiskPersistentVirtualDiskGuid;
+EXTERN EFI_GUID gEfiRamdiskPersistentVirtualCdGuid;
 
-extern UINT8 *gRamdiskImage;
-extern UINT64 gRamdiskImageLength;
+EXTERN EFI_RAM_DISK_PROTOCOL RAMDISK;
 
 
 /**
  * The entry point for the Ramdisk driver.
  *
  * @param[in] ImageHandle     The image handle of the driver.
- * @param[in] SystemTable     The system table.
  *
  * @retval EFI_SUCCESS            All the related protocols were installed.
  * @retval EFI_INVALID_PARAMETER  The protocol was unable to be installed.
  */
 EFI_STATUS
 EFIAPI
-RDEntryPoint(
-    IN EFI_HANDLE ImageHandle,
-    IN EFI_SYSTEM_TABLE *SystemTable
+RamdiskDriverInit(
+    IN EFI_HANDLE           ImageHandle
 );
 
 
 /**
- * Register a RAM disk with specified address, size and type.
+ * Register a ramdisk with specified address, size, and type.
  *
  * @param[in]  RamDiskBase    The base address of registered RAM disk.
  * @param[in]  RamDiskSize    The size of registered RAM disk.
@@ -161,11 +154,11 @@ RDEntryPoint(
 EFI_STATUS
 EFIAPI
 RamDiskRegister(
-    IN UINT64 RamDiskBase,
-    IN UINT64 RamDiskSize,
-    IN EFI_GUID *RamDiskType,
-    IN EFI_DEVICE_PATH *ParentDevicePath OPTIONAL,
-    OUT EFI_DEVICE_PATH_PROTOCOL **DevicePath
+    IN UINT64                       RamDiskBase,
+    IN UINT64                       RamDiskSize,
+    IN EFI_GUID                     *RamDiskType,
+    IN EFI_DEVICE_PATH              *ParentDevicePath OPTIONAL,
+    OUT EFI_DEVICE_PATH_PROTOCOL    **DevicePath
 );
 
 
@@ -188,7 +181,7 @@ RamDiskUnregister(
 VOID
 EFIAPI
 RamDiskInitBlockIo(
-    IN RAMDISK_PRIVATE_DATA *PrivateData
+    IN RAMDISK_PRIVATE_DATA     *PrivateData
 );
 
 
@@ -207,13 +200,13 @@ RamDiskInitBlockIo(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIoReset(
-    IN EFI_BLOCK_IO_PROTOCOL *This,
-    IN BOOLEAN ExtendedVerification
+    IN EFI_BLOCK_IO_PROTOCOL    *This,
+    IN BOOLEAN                  ExtendedVerification
 );
 
 
 /**
- * Read BufferSize bytes from Lba into Buffer.
+ * Read BufferSize bytes from an LBA into a Buffer.
  *
  * @param[in]  This           Indicates a pointer to the calling context.
  * @param[in]  MediaId        Id of the media, changes every time the media is replaced.
@@ -236,16 +229,16 @@ RamDiskBlkIoReset(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIoReadBlocks(
-    IN EFI_BLOCK_IO_PROTOCOL *This,
-    IN UINT32 MediaId,
-    IN EFI_LBA Lba,
-    IN UINTN BufferSize,
-    OUT VOID *Buffer
+    IN EFI_BLOCK_IO_PROTOCOL    *This,
+    IN UINT32                   MediaId,
+    IN EFI_LBA                  Lba,
+    IN UINTN                    BufferSize,
+    OUT VOID                    *Buffer
 );
 
 
 /**
- * Write BufferSize bytes from Lba into Buffer.
+ * Write BufferSize bytes from a Buffer into an LBA.
  *
  * @param[in] This            Indicates a pointer to the calling context.
  * @param[in] MediaId         The media ID that the write request is for.
@@ -269,11 +262,11 @@ RamDiskBlkIoReadBlocks(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIoWriteBlocks(
-    IN EFI_BLOCK_IO_PROTOCOL *This,
-    IN UINT32 MediaId,
-    IN EFI_LBA Lba,
-    IN UINTN BufferSize,
-    IN VOID *Buffer
+    IN EFI_BLOCK_IO_PROTOCOL    *This,
+    IN UINT32                   MediaId,
+    IN EFI_LBA                  Lba,
+    IN UINTN                    BufferSize,
+    IN VOID                     *Buffer
 );
 
 
@@ -290,7 +283,7 @@ RamDiskBlkIoWriteBlocks(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIoFlushBlocks(
-    IN EFI_BLOCK_IO_PROTOCOL *This
+    IN EFI_BLOCK_IO_PROTOCOL    *This
 );
 
 
@@ -308,8 +301,8 @@ RamDiskBlkIoFlushBlocks(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIo2Reset(
-    IN EFI_BLOCK_IO2_PROTOCOL *This,
-    IN BOOLEAN ExtendedVerification
+    IN EFI_BLOCK_IO2_PROTOCOL   *This,
+    IN BOOLEAN                  ExtendedVerification
 );
 
 
@@ -348,12 +341,12 @@ RamDiskBlkIo2Reset(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIo2ReadBlocksEx(
-    IN EFI_BLOCK_IO2_PROTOCOL *This,
-    IN UINT32 MediaId,
-    IN EFI_LBA Lba,
-    IN OUT EFI_BLOCK_IO2_TOKEN *Token,
-    IN UINTN BufferSize,
-    OUT VOID *Buffer
+    IN EFI_BLOCK_IO2_PROTOCOL   *This,
+    IN UINT32                   MediaId,
+    IN EFI_LBA                  Lba,
+    IN OUT EFI_BLOCK_IO2_TOKEN  *Token,
+    IN UINTN                    BufferSize,
+    OUT VOID                    *Buffer
 );
 
 
@@ -390,12 +383,12 @@ RamDiskBlkIo2ReadBlocksEx(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIo2WriteBlocksEx(
-    IN EFI_BLOCK_IO2_PROTOCOL *This,
-    IN UINT32 MediaId,
-    IN EFI_LBA Lba,
-    IN OUT EFI_BLOCK_IO2_TOKEN *Token,
-    IN UINTN BufferSize,
-    IN VOID *Buffer
+    IN EFI_BLOCK_IO2_PROTOCOL   *This,
+    IN UINT32                   MediaId,
+    IN EFI_LBA                  Lba,
+    IN OUT EFI_BLOCK_IO2_TOKEN  *Token,
+    IN UINTN                    BufferSize,
+    IN VOID                     *Buffer
 );
 
 
@@ -420,8 +413,8 @@ RamDiskBlkIo2WriteBlocksEx(
 EFI_STATUS
 EFIAPI
 RamDiskBlkIo2FlushBlocksEx(
-    IN EFI_BLOCK_IO2_PROTOCOL *This,
-    IN OUT EFI_BLOCK_IO2_TOKEN *Token
+    IN EFI_BLOCK_IO2_PROTOCOL   *This,
+    IN OUT EFI_BLOCK_IO2_TOKEN  *Token
 );
 
 

@@ -63,6 +63,20 @@ extern EFI_GUID gEfiAcpiTableProtocolGuid;
 
 
 /**
+ * Calculate the checksum of an ACPI table given its header pointer.
+ *
+ * @param[in]   sdt The base of the table.
+ *
+ * @returns Nothing. The table's checksum is automatically updated.
+ */
+VOID
+EFIAPI
+AcpiChecksumTable(
+    IN EFI_ACPI_DESCRIPTION_HEADER *sdt
+);
+
+
+/**
  * Initialize the ACPI driver, either from a firmware-provided instance
  *  or a local instance of the protocol. MFTAH needs ACPI to register tables.
  * 

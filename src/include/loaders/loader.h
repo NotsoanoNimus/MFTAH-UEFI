@@ -27,6 +27,7 @@ struct {
     HOOK_STALL              StallFunc;
     EFI_PHYSICAL_ADDRESS    LoadedImageBase;
     UINTN                   LoadedImageSize;
+    EFI_DEVICE_PATH         *LoadedImageDevicePath;
     mftah_payload_t         *MftahPayloadWrapper;
 } _PACKED LOADER_CONTEXT;
 
@@ -36,6 +37,7 @@ struct {
 typedef
 struct {
     VOID    (*Load)(LOADER_CONTEXT *Context);
+    VOID    *ExtraInfo;
 } _PACKED EFI_EXECUTABLE_LOADER;
 
 

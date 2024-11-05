@@ -7,7 +7,7 @@
 UINTN _fltused = 0;
 
 /* Image handle instance from the entry call. */
-EFI_HANDLE gImageHandle;
+EFI_HANDLE ENTRY_HANDLE;
 
 /* Concrete definition of the vendor ID. */
 EFI_GUID gXmitVendorGuid = XMIT_XYZ_VENDOR_GUID;
@@ -19,7 +19,9 @@ UINT64 gRamdiskImageLength;
 
 
 
-STATIC VOID EnvironmentInitialize(VOID);
+STATIC VOID EnvironmentInitialize(
+    IN EFI_HANDLE ImageHandle
+);
 
 
 EFI_STATUS
@@ -33,14 +35,14 @@ efi_main(EFI_HANDLE ImageHandle,
 
     /* Initialize the loader. */
     InitializeLib(ImageHandle, SystemTable);
-    gImageHandle = ImageHandle;
+    ENTRY_HANDLE = ImageHandle;
 
     /* Disable the UEFI watchdog timer. The code '0x1FFFF' is a dummy
         value and doesn't actually do anything. Not a magic number. */
     ERRCHECK_UEFI(BS->SetWatchdogTimer, 4, 0, 0x1FFFF, 0, NULL);
 
     /* Load all necessary MFTAH supplementary drivers. */
-    EnvironmentInitialize();
+    EnvironmentInitialize(ImageHandle);
 
     /* Search for the configuration. If it's not found, the user is
         presented with a prompt to enter its filename. */
@@ -110,7 +112,7 @@ efi_main(EFI_HANDLE ImageHandle,
 
 STATIC
 VOID
-EnvironmentInitialize(VOID)
+EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
 {
     EFI_STATUS Status;
 
@@ -120,8 +122,10 @@ EnvironmentInitialize(VOID)
     for (UINTN i = 0; i < 30; ++i) PRINT("\r\n");
 
     EFI_COLOR(MFTAH_COLOR_ASCII_ART);
-    PRINTLN("\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>", MFTAH_UEFI_VERSION, LIBMFTAH_VERSION);
-    PRINTLN("%s", MftahAsciiArt);
+    PRINTLN(
+        "\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>\r\n%s",
+        MFTAH_UEFI_VERSION, LIBMFTAH_VERSION, MftahAsciiArt
+    );
     EFI_COLOR(MFTAH_COLOR_DEFAULT);
 
     /* All drivers are initialized before the configuration is parsed. This
@@ -134,6 +138,10 @@ EnvironmentInitialize(VOID)
 
     if (EFI_ERROR((Status = MftahInit())) || NULL == MftahGetInstance()) {
         ABORT("Failed to initialize the MFTAH adapter driver.");
+    }
+
+    if (EFI_ERROR((Status = RamdiskDriverInit(ImageHandle)))) {
+        ABORT("Failed to initialize the ramdisk driver.");
     }
 
     if (EFI_ERROR((Status = ConfigInit()))) {

@@ -74,7 +74,7 @@ debug: CFLAGS += -DEFI_DEBUG=1
 debug: TARGET = $(TARGET).DEBUG
 debug: $(TARGET) clean-objs
 
-all: $(TARGET) clean-objs
+all: $(SRC_DIR)/Ramdisk.aml.c $(TARGET) clean-objs
 
 %.o: %.c
 	$(CXX) $(CFLAGS) -c -o $@ $<
@@ -83,6 +83,19 @@ all: $(TARGET) clean-objs
 font:
 	xxd -i font.psf >$(PSF_SRC)
 	$(CXX) $(CFLAGS) -c -o $(SRC_DIR)/core/font.o $(PSF_SRC)
+
+
+# The resulting C file will contain a byte array definition (u-char)
+#   for 'Ramdisk_aml' and a 'Ramdisk_aml_len'. These can then be
+#	referenced in other files as 'extern'.
+# NOTE: `xxd -i [FILE]` generated dynamic names, hence the complexity here.
+$(SRC_DIR)/Ramdisk.aml.c: $(SRC_DIR)/Ramdisk.asl
+	iasl $(SRC_DIR)/Ramdisk.asl
+	echo "unsigned char NvdimmRootAml[] = {" >$(SRC_DIR)/Ramdisk.aml.c
+	cat $(SRC_DIR)/Ramdisk.aml | xxd -i >>$(SRC_DIR)/Ramdisk.aml.c
+	echo -ne "};\nunsigned int NvdimmRootAmlLength = " >>$(SRC_DIR)/Ramdisk.aml.c
+	wc -c $(SRC_DIR)/Ramdisk.aml | cut -d' ' -f1 | tr -d '\n' >>$(SRC_DIR)/Ramdisk.aml.c
+	echo ";" >>$(SRC_DIR)/Ramdisk.aml.c
 
 
 $(TARGET): font $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)

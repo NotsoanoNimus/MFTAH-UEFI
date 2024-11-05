@@ -258,7 +258,7 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
 
     /* Use the base image handle as the relative filesystem to load from. If a path
         is prefixed by a volume name, try to get that volume's handle instead. */
-    EFI_HANDLE TargetHandle = gImageHandle;
+    EFI_HANDLE TargetHandle = ENTRY_HANDLE;
 
     CHAR8 *p = Context->Chain->PayloadPath;
     CHAR8 *s = p;
@@ -285,6 +285,10 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
         ERRCHECK(GetFileSystemHandleByVolumeName(VolumeName, &TargetHandle));
     }
 
+    /* Set the context's device handle for chainloaded images,
+            in case we're loading another EFI application. */
+    Context->LoadedImageDevicePath = DevicePathFromHandle(TargetHandle);
+
     /* Do stuff with slight stalls between progress messages. */
     ProgressStatusMessage = "Reading Payload...";
     at = 0; Context->ProgressFunc(&at, &total, NULL);
@@ -303,7 +307,7 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
                       0U,
                       (UINT8 **)&(Context->LoadedImageBase),
                       &(Context->LoadedImageSize),
-                      (TargetHandle == gImageHandle),
+                      (TargetHandle == ENTRY_HANDLE),
                       EfiReservedMemoryType,   /* always mark payload as reserved in e820/memmap */
                       Context->ProgressFunc));
     FreePool(PayloadPath);
@@ -430,11 +434,10 @@ GetPassword__EnterKey:
         switch (MftahStatus) {
             case MFTAH_INVALID_PASSWORD:
             case MFTAH_BAD_PW_HASH:
-                // TODO! Add these 'c8p' wherever needed to get rid of annoying compiler warnings.
-                InputErrorMessage = c8p"Invalid password. Try again.";
+                InputErrorMessage = "Invalid password. Try again.";
                 break;
             default:
-                InputErrorMessage = c8p"Yikes! Invalid protocol parameters.";
+                InputErrorMessage = "Yikes! Invalid protocol parameters.";
                 break;
         }
 
@@ -684,7 +687,7 @@ LoaderEnterChain(IN CONFIGURATION *c,
 
         /* Clear the screen. */
         FB->ClearScreen(FB, 0); FB->Flush(FB);
-        ProgressStatusMessage = c8p"Decrypting...";
+        ProgressStatusMessage = "Decrypting...";
 
         if (EFI_ERROR((Status = LoaderMftahDecrypt(Context)))) {
             LOADER_PANIC("MFTAH decryption encountered a fatal exception.");
@@ -703,7 +706,7 @@ LoaderEnterChain(IN CONFIGURATION *c,
     /* Clear the screen. */
     // TODO Compatibility with both modes please.
     FB->ClearScreen(FB, 0);
-    ProgressStatusMessage = c8p"Chainloading...";
+    ProgressStatusMessage = "Chainloading...";
     GPrint(ProgressStatusMessage,
            FB->BLT,
            (FB->Resolution.Width / 2)

@@ -128,8 +128,7 @@ RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
     }
 
     NfitLen = sizeof(EFI_ACPI_SDT_NFIT) + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
-    // Nfit = AllocateZeroPool(NfitLen);
-    uefi_call_wrapper(BS->AllocatePool, 3, EfiACPIMemoryNVS, NfitLen, &Nfit);
+    Nfit = AllocateZeroPool(NfitLen);
     if (NULL == Nfit) return EFI_OUT_OF_RESOURCES;
 
     SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)

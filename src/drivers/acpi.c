@@ -32,6 +32,7 @@ STATIC EFI_ACPI_DESCRIPTION_HEADER **mKeyedTables = NULL;
 STATIC UINTN mKeyedTablesIndex = 0;
 
 STATIC BOOLEAN mSelfAllocated = FALSE;
+STATIC BOOLEAN mHasAlreadyReplaced = FALSE;
 
 STATIC CONST CHAR *mTableNames[68];
 
@@ -51,10 +52,12 @@ InstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
         pointer in the XSDT. Finally, insert the new table's reference, track
         it locally, and return the index into the pointer array. */
     EFI_STATUS Status = EFI_SUCCESS;
-    UINTN p = 0;
-    EFI_ACPI_DESCRIPTION_HEADER *xsdt
-        = (EFI_ACPI_DESCRIPTION_HEADER *)(mRsdp->XsdtAddress);
-    EFI_ACPI_DESCRIPTION_HEADER *RelocatedHandle = NULL, *NewHandle = NULL;
+    EFI_PHYSICAL_ADDRESS p = 0;
+    EFI_ACPI_DESCRIPTION_HEADER *xsdt = (EFI_ACPI_DESCRIPTION_HEADER *)(mRsdp->XsdtAddress);
+    EFI_ACPI_DESCRIPTION_HEADER *rsdt = (EFI_ACPI_DESCRIPTION_HEADER *)(mRsdp->RsdtAddress);
+    EFI_ACPI_DESCRIPTION_HEADER *RelocatedHandle = NULL,
+                                *OldTableHandle = NULL,
+                                *NewHandle = NULL;
 
     /* Sanity check... */
     if (
@@ -76,23 +79,44 @@ InstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
         return EFI_INVALID_PARAMETER;
     }
 
-    /* Enumerate all XSDT pointers. If the pointer exists, return an ACCESS DENIED. */
+    if (TRUE == mHasAlreadyReplaced) {
+        FreePool(xsdt);
+        FreePool(rsdt);
+    }
+
+    UINTN NewXsdtLength = xsdt->Length + sizeof(EFI_ACPI_DESCRIPTION_HEADER *);
+    uefi_call_wrapper(BS->AllocatePool, 3, EfiACPIMemoryNVS, NewXsdtLength, &xsdt);
+    if (NULL == xsdt) return EFI_OUT_OF_RESOURCES;
+    CopyMem(xsdt, (VOID *)(mRsdp->XsdtAddress), NewXsdtLength - sizeof(EFI_ACPI_DESCRIPTION_HEADER *));
+
+    UINTN NewRsdtLength = rsdt->Length + sizeof(UINT32);
+    uefi_call_wrapper(BS->AllocatePool, 3, EfiACPIMemoryNVS, NewRsdtLength, &rsdt);
+    if (NULL == rsdt) return EFI_OUT_OF_RESOURCES;
+    CopyMem(rsdt, (VOID *)(mRsdp->RsdtAddress), NewRsdtLength - sizeof(UINT32));
+
+    /* Enumerate all XSDT pointers. If the table already exists and is tracked,
+        return an ACCESS DENIED. */
     for (
-        p = (UINT64)xsdt + sizeof(EFI_ACPI_DESCRIPTION_HEADER);
-        p < xsdt->Length;
-        p += sizeof(VOID *)
+        p = (EFI_PHYSICAL_ADDRESS)xsdt + sizeof(EFI_ACPI_DESCRIPTION_HEADER);
+        p < (EFI_PHYSICAL_ADDRESS)xsdt + xsdt->Length;
+        p += sizeof(EFI_ACPI_DESCRIPTION_HEADER *)
     ) {
-        if (*((UINT64 **)p) == AcpiTableBuffer)
+        if (*((EFI_ACPI_DESCRIPTION_HEADER **)p) == (EFI_ACPI_DESCRIPTION_HEADER *)AcpiTableBuffer) {
+            FreePool(xsdt);
+            FreePool(rsdt);
             return EFI_ACCESS_DENIED;
+        }
     }
 
     /* Alright, we're good. Insert the handle at the end of the table. */
-    ERRCHECK_UEFI(BS->AllocatePool, 2,
+    ERRCHECK_UEFI(BS->AllocatePool, 3,
                   EfiACPIMemoryNVS,
                   AcpiTableBufferSize,
                   (VOID **)&NewHandle);
     if (NULL == NewHandle) {
         EFI_DANGERLN("ERROR: ACPI: Out of resources!");
+        FreePool(xsdt);
+        FreePool(rsdt);
         return EFI_OUT_OF_RESOURCES;
     }
 
@@ -101,50 +125,98 @@ InstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
     /* Adding a new entry is potentially destructive! Move colliding tables away. */
     /* TODO: Figure out a way to expand the reserved memory range of the XSDT
         as entries are dynamically added. */
-    for (UINTN i = 0; i < sizeof(VOID *); ++i) {
-        if (*((UINT8 *)(p + i)) < 'A' || *((UINT8 *)(p + i)) > 'Z') continue;
+    // for (UINTN i = 0; i < sizeof(VOID *); ++i) {
+    //     if (*((UINT8 *)(p + i)) < 'A' || *((UINT8 *)(p + i)) > 'Z') continue;
 
-        /* This is expensive but it works just fine for well-known tables. */
-        for (UINTN j = 0; j < sizeof(mTableNames) / sizeof(const char *); ++j) {
-            if (0 != CompareMem((VOID *)(p + i), mTableNames[j], 4)) continue;
-        }
+    //     /* This is expensive but it works just fine for well-known tables. */
+    //     for (UINTN j = 0; j < sizeof(mTableNames) / sizeof(const char *); ++j) {
+    //         if (0 != CompareMem((VOID *)(p + i), mTableNames[j], 4)) continue;
 
-        /* Create a new table at a different reserved memory location. */
-        ERRCHECK_UEFI(BS->AllocatePool, 2,
-                      EfiACPIMemoryNVS,
-                      (*(EFI_ACPI_DESCRIPTION_HEADER **)(p + i))->Length,
-                      (VOID **)&RelocatedHandle);
-        if (NULL == RelocatedHandle) {
-            EFI_DANGERLN("ERROR: ACPI: Out of resources!");
-            return EFI_OUT_OF_RESOURCES;
-        }
+    //         /* Hmm... A matching table seems to be here. Reposition it. */
+    //         OldTableHandle = (EFI_ACPI_DESCRIPTION_HEADER *)(p + i);
 
-        CopyMem(RelocatedHandle,
-                (*(EFI_ACPI_DESCRIPTION_HEADER **)(p + i)),
-                (*(EFI_ACPI_DESCRIPTION_HEADER **)(p + i))->Length);
+    //         /* Create a new table at a different reserved memory location. */
+    //         ERRCHECK_UEFI(BS->AllocatePool, 3,
+    //                       EfiACPIMemoryNVS,
+    //                       OldTableHandle->Length,
+    //                       (VOID **)&RelocatedHandle);
+    //         if (NULL == RelocatedHandle) {
+    //             EFI_DANGERLN("ERROR: ACPI: Out of resources!");
+    //             return EFI_OUT_OF_RESOURCES;
+    //         }
 
-        /* Scan the XSDT for pointers to the previous entry and replace them. */
-        /* TODO: This doesn't handle pointers from sub-tables like the FADT. */
-        for (
-            UINTN k = (UINT64)xsdt + sizeof(EFI_ACPI_DESCRIPTION_HEADER);
-            k < xsdt->Length;
-            k += sizeof(UINT64)
-        ) {
-            if (*((UINT64 **)k) == (UINT64 *)(p + i)) {
-                *((UINT64 **)k) = (UINT64 *)RelocatedHandle;
-            }
-        }
-    }
+    //         CopyMem((VOID *)RelocatedHandle, (VOID *)OldTableHandle, OldTableHandle->Length);
 
-    p -= sizeof(VOID *);
+    //         /* Scan the XSDT for pointers to the previous entry and replace them. */
+    //         /* TODO: This doesn't handle pointers from sub-tables like the FADT. */
+    //         for (
+    //             EFI_PHYSICAL_ADDRESS k = (EFI_PHYSICAL_ADDRESS)xsdt + sizeof(EFI_ACPI_DESCRIPTION_HEADER);
+    //             k < (EFI_PHYSICAL_ADDRESS)xsdt + xsdt->Length;
+    //             k += sizeof(EFI_PHYSICAL_ADDRESS)
+    //         ) {
+    //             if (*((EFI_PHYSICAL_ADDRESS *)k) == (EFI_PHYSICAL_ADDRESS)OldTableHandle) {
+    //                 *((EFI_PHYSICAL_ADDRESS *)k) = (EFI_PHYSICAL_ADDRESS)RelocatedHandle;
+    //                 CHAR8 oldsig[5] = {0}; CopyMem(oldsig, (VOID *)&(OldTableHandle->Signature), 4);
+    //                 PRINTLN("Replaced %a reference at 0x%08p (XSDT: 0x%08p)", oldsig, (VOID *)k, xsdt);
+    //                 uefi_call_wrapper(BS->Stall, 1, 5000000);
+    //             }
+    //         }
+
+    //         /* Zero out the old table details. This is in hopes to avoid any spurious ACPI auto-detection. */
+    //         SetMem((VOID *)OldTableHandle, OldTableHandle->Length, 0x00);
+
+    //         /* Since ACPI headers are longer than the size of a pointer, we can safely stop. */
+    //         i += sizeof(EFI_ACPI_DESCRIPTION_HEADER);   /* will break the outer for-loop */
+    //         break;
+    //     }
+    // }
 
     /* Finally, add the entry. */
     *((EFI_ACPI_DESCRIPTION_HEADER **)p) = NewHandle;
-    xsdt->Length += sizeof(VOID *);
+    xsdt->Length += sizeof(EFI_ACPI_DESCRIPTION_HEADER *);
+
+    *((UINT32 *)((EFI_PHYSICAL_ADDRESS)rsdt + rsdt->Length)) = (UINT32)NewHandle;
+    rsdt->Length += sizeof(UINT32);
 
     /* We're nice and we'll double-check the checksum for them. :) */
     AcpiChecksumTable(NewHandle);
     AcpiChecksumTable(xsdt);   /* This is a MUST. */
+
+    mRsdp->XsdtAddress = (UINT64)xsdt;
+    mRsdp->RsdtAddress = (UINT32)rsdt;
+    mHasAlreadyReplaced = TRUE;
+
+    /* Checksum the RSDP table in both places. */
+    {
+        UINT32 sum = 0;
+
+        mRsdp->Checksum = 0;
+        for (UINTN i = 0; i < 20; ++i) {
+            sum += *((UINT8 *)((EFI_PHYSICAL_ADDRESS)mRsdp + i));
+        }
+        mRsdp->Checksum = (UINT8)(0x100 - (sum % 0x100));
+
+        sum = 0;
+
+        mRsdp->ExtendedChecksum = 0;
+        for (UINTN i = 0; i < sizeof(EFI_ACPI_SDT_RSDP); ++i) {
+            sum += *((UINT8 *)((EFI_PHYSICAL_ADDRESS)mRsdp + i));
+        }
+        mRsdp->ExtendedChecksum = (UINT8)(0x100 - (sum % 0x100));
+    }
+
+    /* If the location of the pointer is in the RSDT, then update that too. */
+    // if (NULL != rsdt) {
+    //     for (
+    //         UINT32 a = (EFI_PHYSICAL_ADDRESS)rsdt + sizeof(EFI_ACPI_DESCRIPTION_HEADER);
+    //         a < (EFI_PHYSICAL_ADDRESS)rsdt + rsdt->Length;
+    //         a += sizeof(UINT32)
+    //     ) {
+    //         if (*((UINT32 *)a) == (UINT32)OldTableHandle) {
+    //             *((UINT32 *)a) = (UINT32)NewHandle;
+    //         }
+    //     }
+    // }
 
     /* Update the index of tracked installed tables. */
     *TableKey = mKeyedTablesIndex;
@@ -193,7 +265,7 @@ UninstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
 
     AcpiChecksumTable(xsdt);
 
-    mKeyedTables[mKeyedTablesIndex] = 0;
+    mKeyedTables[mKeyedTablesIndex] = NULL;
     --mKeyedTablesIndex;
 
     return EFI_SUCCESS;
@@ -292,8 +364,7 @@ AcpiInit(VOID)
 {
     if (EFI_ERROR(AcpiProtocolCheck())) {
         /* Yikes. We have to hook our own driver to perform ACPI tasks. */
-        // AcpiSelfInit();   /* Get RSDP and ensure ACPI revision is >2.0 */
-        return EFI_DEVICE_ERROR;
+        AcpiSelfInit();   /* Get RSDP and ensure ACPI revision is >2.0 */
     }
 
     return (NULL == mAcpiTableProtocol)

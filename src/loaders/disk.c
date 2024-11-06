@@ -113,11 +113,8 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
     Context->LoadedImageBase = (EFI_PHYSICAL_ADDRESS)NestedChainloadFileBuffer;
     Context->LoadedImageSize = NestedChainloadFileSize;
-
-    if (NULL != Context->LoadedImageDevicePath) {
-        FreePool(Context->LoadedImageDevicePath);
-    }
     Context->LoadedImageDevicePath = FileDevicePath(RamdiskDeviceHandle, TargetPath);
+
     FreePool(TargetPath);
 
     /* Ramdisks are a bit different: the sub-type loader is now called on the loaded image.

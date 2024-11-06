@@ -26,15 +26,14 @@
     STRINGIFY(MFTAH_UEFI_VERSION_PATCH)
 
 // TODO: Move these up into 'mftah.h'
-#define _UNUSED  __attribute__((unused))
-#define _PACKED  __attribute__((packed))
-#define CHAR char
-#define INLINE inline
-#define c8 (CHAR8)
+#define CHAR        char
+#define INLINE      inline
+#define c8          (CHAR8)
+#define c8p         (CHAR8 *)
 
 /* Various IDs for ACPI entries inserted at runtime. */
 #define MFTAH_CREATOR_ID    EFI_SIGNATURE_32('X', 'M', 'I', 'T')   /* Creator: 'XMIT' */
-#define MFTAH_OEM_TABLE_ID  EFI_SIGNATURE_64('M', 'F', 'T', 'A', 'H', 'F', 'M', 'T')
+#define MFTAH_OEM_TABLE_ID  EFI_SIGNATURE_64('M', 'F', 'T', 'A', 'H', 'N', 'V', 'D')
 
 /* The GUID that represents the developer (in this case, my personal site). */
 #define XMIT_XYZ_VENDOR_GUID \
@@ -181,7 +180,7 @@ struct {
     CHAR16              *Name;
     EFI_FILE_PROTOCOL   *VolumeHandle;
     UINT8 VOLATILE      SharedMutex;
-} _PACKED PAYLOAD;
+} __attribute__((packed)) PAYLOAD;
 
 /**
  * A meta-container for thread objects. These get dynamically assigned to available MPS when started.
@@ -196,7 +195,7 @@ struct S_MFTAH_THREAD {
     EFI_STATUS VOLATILE         ExitStatus;
     EFI_AP_PROCEDURE            Method;
     VOID VOLATILE *VOLATILE     Context;
-} _PACKED MFTAH_THREAD;
+} __attribute__((packed)) MFTAH_THREAD;
 
 /**
  * Primary structure of decryption thread contexts using the MP library.
@@ -209,7 +208,7 @@ struct {
     mftah_progress_t        *Progress;
     UINT8                   Sha256Key[SIZE_OF_SHA_256_HASH];
     UINT8                   InitializationVector[AES_BLOCKLEN];
-} _PACKED DECRYPT_THREAD_CTX;
+} __attribute__((packed)) DECRYPT_THREAD_CTX;
 
 
 /** 

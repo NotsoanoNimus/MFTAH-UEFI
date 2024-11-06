@@ -12,7 +12,7 @@ struct {
     UINTN               ConfiguredChainIndex;
     CONFIG_CHAIN_BLOCK  *Chain;
     BOOLEAN             Enabled;
-} _PACKED MENU_ITEM;
+} __attribute__((packed)) MENU_ITEM;
 
 typedef
 struct {
@@ -24,7 +24,7 @@ struct {
     VOLATILE BOOLEAN    PauseTickRenders;
     VOLATILE BOOLEAN    KeyPressReceived;
     VOLATILE UINTN      MillisecondsElapsed;
-} _PACKED MENU_STATE;
+} __attribute__((packed)) MENU_STATE;
 
 
 typedef
@@ -84,7 +84,7 @@ struct {
     MENU_HOOK__REDRAW               Redraw;
     MENU_HOOK__CLEAR_SCREEN         ClearScreen;
     EFI_EVENT_NOTIFY                Tick;
-} _PACKED EFI_MENU_RENDERER_PROTOCOL;
+} __attribute__((packed)) EFI_MENU_RENDERER_PROTOCOL;
 
 EXTERN CONST EFI_MENU_RENDERER_PROTOCOL *MENU;
 
@@ -93,7 +93,7 @@ typedef
 struct {
     MENU_STATE      *m;
     CONFIGURATION   *c;
-} _PACKED TIMER_CTX;
+} __attribute__((packed)) TIMER_CTX;
 
 
 

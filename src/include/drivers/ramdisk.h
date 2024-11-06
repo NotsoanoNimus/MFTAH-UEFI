@@ -77,7 +77,7 @@ struct {
     UINT32                      EndingAddr[2];
     EFI_GUID                    TypeGuid;
     UINT16                      Instance;
-} _PACKED MEDIA_RAMDISK_DEVICE_PATH;
+} __attribute__((packed)) MEDIA_RAMDISK_DEVICE_PATH;
 
 typedef
 struct {

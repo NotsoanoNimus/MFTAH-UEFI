@@ -26,7 +26,7 @@ struct _EFI_ACPI_DESCRIPTION_HEADER {
     UINT32  OemRevision;
     UINT32  CreatorId;
     UINT32  CreatorRevision;
-} _PACKED EFI_ACPI_DESCRIPTION_HEADER;
+} __attribute__((packed)) EFI_ACPI_DESCRIPTION_HEADER;
 /*************************************/
 
 

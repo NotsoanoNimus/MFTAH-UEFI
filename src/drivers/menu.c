@@ -94,7 +94,7 @@ EnterMenu(CONFIGURATION *c)
             MenuState->DefaultItemindex = i;
         }
 
-        MenuState->ItemsList[i].Chain = &(c->Chains[i]);
+        MenuState->ItemsList[i].Chain = c->Chains[i];
         MenuState->ItemsList[i].ConfiguredChainIndex = i;
         MenuState->ItemsList[i].Enabled = TRUE;
         MenuState->ItemsList[i].Text = c->Chains[i]->Name;

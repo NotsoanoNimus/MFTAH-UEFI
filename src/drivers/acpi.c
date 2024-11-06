@@ -21,7 +21,7 @@ struct {
     UINT64  XsdtAddress;
     UINT8   ExtendedChecksum;
     UINT8   Reserved[3];
-} _PACKED EFI_ACPI_SDT_RSDP;
+} __attribute__((packed)) EFI_ACPI_SDT_RSDP;
 
 STATIC EFI_ACPI_SDT_RSDP *mRsdp = NULL;
 
@@ -253,7 +253,7 @@ EFI_STATUS
 EFIAPI
 AcpiProtocolCheck(VOID)
 {
-    EFI_STATUS Status;
+    EFI_STATUS Status = EFI_SUCCESS;
 
     /* Attempt to locate the EFI_ACPI_TABLE_PROTOCOL from the firmware. */
     ERRCHECK_UEFI(
@@ -292,7 +292,8 @@ AcpiInit(VOID)
 {
     if (EFI_ERROR(AcpiProtocolCheck())) {
         /* Yikes. We have to hook our own driver to perform ACPI tasks. */
-        AcpiSelfInit();   /* Get RSDP and ensure ACPI revision is >2.0 */
+        // AcpiSelfInit();   /* Get RSDP and ensure ACPI revision is >2.0 */
+        return EFI_DEVICE_ERROR;
     }
 
     return (NULL == mAcpiTableProtocol)

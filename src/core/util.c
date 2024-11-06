@@ -31,6 +31,8 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
          OUT UINTN *LoadedFileSize,
          IN BOOLEAN HandleIsLoadedImage,
          IN EFI_MEMORY_TYPE AllocatedMemoryType,
+         IN UINTN RoundToBlockSize,
+         IN UINTN ExtraEndAllocation,
          IN PROGRESS_UPDATE_HOOK ProgressHook OPTIONAL)
 {
     EFI_STATUS Status = EFI_SUCCESS;
@@ -43,6 +45,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
 
     UINTN ChunkReadSize = MFTAH_RAMDISK_LOAD_BLOCK_SIZE;   /* 64 KiB */
     UINT8 *Buffer = NULL;
+    UINTN ActualFileSize = 0;
 
     if (
         NULL == BaseImageHandle
@@ -58,7 +61,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
                                    &gEfiLoadedImageProtocolGuid,
                                    (VOID **)&LoadedImage);
         if (EFI_ERROR(Status)) {
-            EFI_DANGERLN("   ~ Error locating Loaded Image Protocol handle.");
+            EFI_DANGERLN("Error locating Loaded Image Protocol handle (%u).", Status);
             return Status;
         }
 
@@ -71,7 +74,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
                                &gEfiSimpleFileSystemProtocolGuid,
                                (VOID **)&ImageIoHandle);
     if (EFI_ERROR(Status)) {
-        EFI_DANGERLN("   ~ Error initializing SFS protocol handle.");
+        EFI_DANGERLN("Error initializing SFS protocol handle (%u).", Status);
         return Status;
     }
 
@@ -80,7 +83,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
                                ImageIoHandle,
                                &VolumeHandle);
     if (EFI_ERROR(Status)) {
-        EFI_DANGERLN("   ~ Error opening volume handle.");
+        EFI_DANGERLN("Error opening volume handle (%u).", Status);
         return Status;
     }
 
@@ -95,22 +98,41 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
                                 | EFI_FILE_HIDDEN
                                 | EFI_FILE_SYSTEM));
     if (EFI_ERROR(Status)) {
-        EFI_DANGERLN("   ~ Error opening file handle.");
+        EFI_DANGERLN("Error opening file handle (%u).", Status);
         return Status;
     }
 
     /* Update the known size of the file. */
-    *LoadedFileSize = FileSize(LoadedFileHandle);
-    if (0 == *LoadedFileSize) {
+    ActualFileSize = FileSize(LoadedFileHandle);
+    if (0 == ActualFileSize) {
         Status = EFI_END_OF_FILE;
         goto ReadFile__clean_up_and_exit;
     }
 
+    if (0 != RoundToBlockSize) {
+        /* Round the buffer up to the requested block size. */
+        *LoadedFileSize = (ActualFileSize) + (RoundToBlockSize - (ActualFileSize % RoundToBlockSize));
+    } else {
+        *LoadedFileSize = ActualFileSize;
+    }
+
+    (*LoadedFileSize) += ExtraEndAllocation;
+
     /* Stage the buffer in memory. */
-    Status = uefi_call_wrapper(BS->AllocatePool, 3, AllocatedMemoryType, *LoadedFileSize, (VOID **)&Buffer);
+    Status = uefi_call_wrapper(BS->AllocatePool, 3,
+                               AllocatedMemoryType,
+                               *LoadedFileSize,
+                               (VOID **)&Buffer);
     if (EFI_ERROR(Status) || NULL == Buffer) {
         Status = EFI_OUT_OF_RESOURCES;
         goto ReadFile__clean_up_and_exit;
+    }
+
+    if (0 != RoundToBlockSize || 0 != ExtraEndAllocation) {
+        /* Ensure the trailing padding (which won't have the file read into it) is explicitly set to zero. */
+        SetMem((VOID *)((EFI_PHYSICAL_ADDRESS)Buffer + (*LoadedFileSize) - RoundToBlockSize - ExtraEndAllocation),
+                (RoundToBlockSize + ExtraEndAllocation),
+                0x00);
     }
     
     /* Set the starting position to the `Offset` value. */
@@ -125,7 +147,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
     }
 
     /* Now scroll along the length of the file, reading chunks into memory. */
-    for (UINTN i = 0; i < *LoadedFileSize; i += ChunkReadSize) {
+    for (UINTN i = 0; i < ActualFileSize; i += ChunkReadSize) {
         /* The loop should never repeat with a 0-valued ChunkReadSize. */
         if (0 == ChunkReadSize) return EFI_END_OF_FILE;
 
@@ -143,13 +165,13 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
 
         /* Only print the progress every so often (if the hook is given). */
         if (NULL != ProgressHook && 0 == (i % (1 << 20))) {
-            ProgressHook(&i, LoadedFileSize, NULL);
+            ProgressHook(&i, &ActualFileSize, NULL);
         }
     }
 
     /* Always print 100% if the hook is enabled. */
     if (NULL != ProgressHook) {
-        ProgressHook(LoadedFileSize, LoadedFileSize, NULL);
+        ProgressHook(&ActualFileSize, &ActualFileSize, NULL);
     }
 
     /* All done! Return the location of the buffer. */

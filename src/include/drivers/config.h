@@ -35,7 +35,7 @@ struct {
     BOOLEAN     IsCompressed;
     BOOLEAN     IsImmediate;
     BOOLEAN     IsDefault;
-} _PACKED CONFIG_CHAIN_BLOCK;
+} __attribute__((packed)) CONFIG_CHAIN_BLOCK;
 
 typedef
 enum {
@@ -47,7 +47,7 @@ typedef
 struct {
     UINT32  Foreground;
     UINT32  Background;
-} _PACKED COLOR_PAIR;
+} __attribute__((packed)) COLOR_PAIR;
 
 typedef
 struct {
@@ -78,7 +78,7 @@ struct {
     CHAR8               *Banner;
     CONFIG_CHAIN_BLOCK  *Chains[CONFIG_MAX_CHAINS];
     UINTN               ChainsLength;
-} _PACKED CONFIGURATION;
+} __attribute__((packed)) CONFIGURATION;
 
 
 /**

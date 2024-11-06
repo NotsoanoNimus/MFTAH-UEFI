@@ -13,6 +13,7 @@ EFI_STATUS
 TextModeDestroy(VOID)
 {
     // TODO! Basically all of TEXT mode
+    return EFI_SUCCESS;
 }
 
 

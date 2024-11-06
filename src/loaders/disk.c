@@ -36,8 +36,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
         PANIC("Could not register the loaded ramdisk through the active protocol.");
     }
 
-    PRINTLN("Ramdisk Device Path:\r\n   %s\r\n", DevicePathToStr(RamdiskDevicePath));
-
     /* Next, find the target image to chainload and load it to another segment of reserved memory. */
     Status = uefi_call_wrapper(BS->LocateDevicePath, 3,
                                &gEfiSimpleFileSystemProtocolGuid,
@@ -58,10 +56,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
         for (UINTN i = 0; i < HandlesCount; ++i) {
             EFI_DEVICE_PATH *p = DevicePathFromHandle(Handles[i]);
-            CHAR16 *CandidateDevPathStr = DevicePathToStr(p);
-
-            PRINTLN("   Candidate: %s", CandidateDevPathStr);
-            FreePool(CandidateDevPathStr);
 
             /* Compare the type, sub-type, and ramdisk starting address for the handle.
                See: https://uefi.org/specs/UEFI/2.10/10_Protocols_Device_Path_Protocol.html#ram-disk */
@@ -110,6 +104,8 @@ LoadImage(IN LOADER_CONTEXT *Context)
                       &NestedChainloadFileSize,
                       FALSE,
                       EfiReservedMemoryType,
+                      0,
+                      0,
                       NULL);
     if (EFI_ERROR(Status)) {
         PANIC("There was a problem loading the chain's target.");

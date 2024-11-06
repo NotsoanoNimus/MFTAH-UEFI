@@ -34,6 +34,10 @@ FileSize(
  * @param[in]   Offset          Starting offset into the file to read from.
  * @param[out]  OutputBuffer    Returns a pointer to the read buffer. NULL on error.
  * @param[out]  LoadedFileSize  Returns the length of the read file.
+ * @param[in]   HandleIsLoadedImage Whether the provided handle should be parsed as a Loaded Image handle.
+ * @param[in]   AllocatedMemoryType The EFI memory type to use when reserving the buffer.
+ * @param[in]   RoundToBlockSize    Rounds up the size of the allocated buffer to a nearest multiple of this value, if not 0.
+ * @param[in]   ExtraEndAllocation  Any additional allocation to make onto the end of the buffer.
  * @param[in]   ProgressHook    An optional function that can report occasional progress details.
  * 
  * @retval  EFI_SUCCESS     Successfully read the file and returned details.
@@ -53,6 +57,8 @@ ReadFile(
     OUT UINTN               *LoadedFileSize,
     IN BOOLEAN              HandleIsLoadedImage,
     IN EFI_MEMORY_TYPE      AllocatedMemoryType,
+    IN UINTN                RoundToBlockSize,
+    IN UINTN                ExtraEndAllocation,
     IN PROGRESS_UPDATE_HOOK ProgressHook        OPTIONAL
 );
 

@@ -29,7 +29,7 @@ struct {
     UINTN                   LoadedImageSize;
     EFI_DEVICE_PATH         *LoadedImageDevicePath;
     mftah_payload_t         *MftahPayloadWrapper;
-} _PACKED LOADER_CONTEXT;
+} __attribute__((packed)) LOADER_CONTEXT;
 
 
 
@@ -38,7 +38,7 @@ typedef
 struct {
     VOID    (*Load)(LOADER_CONTEXT *Context);
     VOID    *ExtraInfo;
-} _PACKED EFI_EXECUTABLE_LOADER;
+} __attribute__((packed)) EFI_EXECUTABLE_LOADER;
 
 
 

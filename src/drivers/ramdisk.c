@@ -12,6 +12,9 @@ EFI_GUID gEfiRamdiskVirtualCdGuid = EFI_VIRTUAL_CD_GUID;
 EFI_GUID gEfiRamdiskPersistentVirtualDiskGuid = EFI_PERSISTENT_VIRTUAL_DISK_GUID;
 EFI_GUID gEfiRamdiskPersistentVirtualCdGuid = EFI_PERSISTENT_VIRTUAL_CD_GUID;
 
+EXTERN unsigned char NvdimmRootAml[];
+EXTERN unsigned int NvdimmRootAmlLength;
+
 
 STATIC
 UINTN
@@ -82,21 +85,16 @@ STATIC
 EFI_STATUS
 RamDiskPublishSsdt(VOID)
 {
-    EFI_STATUS Status;
     UINTN DummySsdtTableKey = 0;   /* don't care about preserving this returned value */
-
-    EXTERN unsigned char NvdimmRootAml;
-    EXTERN unsigned int NvdimmRootAmlLength;
-
     EFI_ACPI_TABLE_PROTOCOL *ACPI = AcpiGetInstance();
+
     if (NULL == ACPI) return EFI_DEVICE_ERROR;
 
-    Status = uefi_call_wrapper(ACPI->InstallAcpiTable, 4,
-                               ACPI,
-                               (VOID *)&NvdimmRootAml,
-                               NvdimmRootAmlLength,
-                               &DummySsdtTableKey);
-    return Status;
+    return uefi_call_wrapper(ACPI->InstallAcpiTable, 4,
+                             ACPI,
+                             NvdimmRootAml,
+                             NvdimmRootAmlLength,
+                             &DummySsdtTableKey);
 }
 
 
@@ -119,26 +117,25 @@ RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
     VOID *Nfit;
     UINT32 NfitLen;
 
+    /* Assume that if no NFIT is in the ACPI table, then there is no NVDIMM Root Device. */
+    /* TODO! Determine if one exists already and append the SPA. */
+    Status = RamDiskPublishSsdt();
+    if (EFI_ERROR(Status)) return Status;
+
     ACPI = AcpiGetInstance();
     if (NULL == ACPI) {
         return EFI_NOT_FOUND;
     }
 
-    /* Assume that if no NFIT is in the ACPI table, then there is no NVDIMM 
-          device in the \SB scope. So report one via the SSDT. */
-    /* TODO! Determine if one exists already and append the SPA. */
-    ERRCHECK(RamDiskPublishSsdt());
-
     NfitLen = sizeof(EFI_ACPI_SDT_NFIT) + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
-    Nfit = AllocateZeroPool(NfitLen);
-    if (NULL == Nfit) {
-        return EFI_OUT_OF_RESOURCES;
-    }
+    // Nfit = AllocateZeroPool(NfitLen);
+    uefi_call_wrapper(BS->AllocatePool, 3, EfiACPIMemoryNVS, NfitLen, &Nfit);
+    if (NULL == Nfit) return EFI_OUT_OF_RESOURCES;
 
     SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)
-        ((EFI_PHYSICAL_ADDRESS)Nfit + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE));
+        ((EFI_PHYSICAL_ADDRESS)Nfit + sizeof(EFI_ACPI_SDT_NFIT));
 
-    UINT8 PcdAcpiDefaultOemId[6] = { 'X', 'M', 'I', 'T', ' ', ' ' };
+    UINT8 PcdAcpiDefaultOemId[6] = { 'M', 'F', 'T', 'A', 'H', ' ' };
 
     NfitHeader                  = (EFI_ACPI_DESCRIPTION_HEADER *)Nfit;
     NfitHeader->Signature       = EFI_ACPI_NFIT_SIGNATURE;
@@ -167,7 +164,7 @@ RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
                                NfitHeader->Length,
                                &TableKey);
 
-    FreePool(Nfit);
+    // FreePool(Nfit);
     return Status;
 }
 
@@ -208,12 +205,9 @@ RamDiskRegister(IN UINT64 RamDiskBase,
                 IN EFI_DEVICE_PATH *ParentDevicePath OPTIONAL,
                 OUT EFI_DEVICE_PATH_PROTOCOL **DevicePath)
 {
-    EFI_STATUS                      Status;
-    RAMDISK_PRIVATE_DATA            *PrivateData;
-    RAMDISK_PRIVATE_DATA            *RegisteredPrivateData;
-    MEDIA_RAMDISK_DEVICE_PATH       *RamDiskDevNode;
-    UINTN                           DevicePathSizeInt;
-    LIST_ENTRY                      *Entry;
+    EFI_STATUS Status;
+    RAMDISK_PRIVATE_DATA *PrivateData;
+    MEDIA_RAMDISK_DEVICE_PATH *RamDiskDevNode;
 
     if ((0 == RamDiskSize) || (NULL == RamDiskType) || (NULL == DevicePath)) {
         EFI_DANGERLN("\r\nNo ramdisk or ramdisk device path was found.");
@@ -244,7 +238,8 @@ RamDiskRegister(IN UINT64 RamDiskBase,
     /* Initialize the loaded ramdisk's structure. */
     PrivateData = (RAMDISK_PRIVATE_DATA *)AllocateZeroPool(sizeof(RAMDISK_PRIVATE_DATA));
     if (NULL == PrivateData) {
-        return EFI_OUT_OF_RESOURCES;
+        Status = EFI_OUT_OF_RESOURCES;
+        goto ErrorExit;
     }
 
     CopyMem(PrivateData, &mRamDiskPrivateDataTemplate, sizeof(RAMDISK_PRIVATE_DATA));
@@ -288,24 +283,21 @@ RamDiskRegister(IN UINT64 RamDiskBase,
                                &gEfiDevicePathProtocolGuid,
                                PrivateData->DevicePath,
                                NULL);
-    if (EFI_ERROR(Status)) {
-        goto ErrorExit;
-    }
+    if (EFI_ERROR(Status)) goto ErrorExit;
 
     Status = uefi_call_wrapper(BS->ConnectController, 4,
                                PrivateData->Handle,
                                NULL,
                                NULL,
                                TRUE);
-    if (EFI_ERROR(Status)) {
-        goto ErrorExit;
-    }
+    if (EFI_ERROR(Status)) goto ErrorExit;
 
     FreePool(RamDiskDevNode);
 
-    ERRCHECK(RamDiskPublishNfit(PrivateData));
+    Status = RamDiskPublishNfit(PrivateData);
+    if (EFI_ERROR(Status)) goto ErrorExit;
 
-    return EFI_SUCCESS;
+    return Status;
 
 ErrorExit:
     if (NULL != RamDiskDevNode) {
@@ -313,7 +305,7 @@ ErrorExit:
     }
 
     if (NULL != PrivateData) {
-        if (PrivateData->DevicePath) {
+        if (NULL != PrivateData->DevicePath) {
             FreePool(PrivateData->DevicePath);
         }
         FreePool(PrivateData);

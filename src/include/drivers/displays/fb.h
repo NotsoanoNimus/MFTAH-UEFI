@@ -12,11 +12,11 @@
 
 
 typedef
-struct S_FB_PROTO _PACKED
+struct S_FB_PROTO __attribute__((packed))
 EFI_SIMPLE_FRAMEBUFFER_PROTOCOL;
 
 typedef
-struct S_BOUNDED_SHAPE _PACKED
+struct S_BOUNDED_SHAPE __attribute__((packed))
 BOUNDED_SHAPE;
 
 
@@ -24,13 +24,13 @@ typedef
 struct {
     UINTN   X;
     UINTN   Y;
-} _PACKED FB_VERTEX;
+} __attribute__((packed)) FB_VERTEX;
 
 typedef
 struct {
     UINTN   Width;
     UINTN   Height;
-} _PACKED FB_DIMENSION;
+} __attribute__((packed)) FB_DIMENSION;
 
 typedef
 enum {
@@ -61,7 +61,7 @@ struct S_BOUNDED_SHAPE {
     UINTN                   BufferSize; /* Easy access to the buffer length */
     EFI_PHYSICAL_ADDRESS    Buffer;     /* Actual pixel/FB data location in physical memory */
     HOOK_DRAW               Draw;       /* Optional child method used to render the shape to its buffer. */
-} _PACKED;
+} __attribute__((packed));
 
 
 // TODO! Add 'IN', 'OUT', 'CONST' etc qualifiers to these prototypes.
@@ -196,7 +196,7 @@ struct S_FB_PROTO {
     FB_HOOK__DRAW_SIMPLE_SHAPE      DrawSimpleShape;
     FB_HOOK__DRAW_POLYGON           DrawPolygon;
     FB_HOOK__RENDER_COMPONENT       RenderComponent;
-} _PACKED;
+} __attribute__((packed));
 
 
 EXTERN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *FB;

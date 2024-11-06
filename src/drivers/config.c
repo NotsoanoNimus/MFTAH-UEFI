@@ -34,7 +34,7 @@ struct {
     CONST CHAR  *Name;
     UINTN       TextColor;
     UINT32      GraphicalColor;
-} _PACKED CONFIG_COMMON_COLOR_TUPLE;
+} __attribute__((packed)) CONFIG_COMMON_COLOR_TUPLE;
 
 /* Foreground color mappings - Names to some common colors useable
     in both modes at any time. */
@@ -75,7 +75,7 @@ typedef
 struct {
     CONST CHAR  *Element;
     EFI_STATUS  (EFIAPI *Handler)(CHAR *Data);
-} _PACKED CONFIG_HANDLER_TUPLE;
+} __attribute__((packed)) CONFIG_HANDLER_TUPLE;
 
 /* Construct a list of config handler methods. */
 #define DECL_HANDLER(name) \
@@ -559,6 +559,8 @@ ConfigParse(IN EFI_HANDLE RelativeImageHandle,
                       &ReadFileLength,
                       TRUE,
                       EfiBootServicesData,
+                      0,
+                      0,
                       NULL);
     if (EFI_ERROR(Status)) {
         EFI_DANGERLN("`ReadFile` returned a fatal error.");

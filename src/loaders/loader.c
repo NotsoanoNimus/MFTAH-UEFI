@@ -9,6 +9,7 @@
 #include "../include/drivers/displays/text.h"
 #include "../include/drivers/displays/fb.h"
 #include "../include/drivers/mftah_adapter.h"
+#include "../include/drivers/ramdisk.h"
 
 #include "../include/core/input.h"
 
@@ -43,7 +44,7 @@ typedef
 struct {
     CHAIN_TYPE              Type;
     EFI_EXECUTABLE_LOADER   *FormatHandle;
-} _PACKED LOADER_PAIR;
+} __attribute__((packed)) LOADER_PAIR;
 
 
 STATIC BOUNDED_SHAPE *LoadingIconUnderlayBlt,
@@ -315,6 +316,8 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
                       &(Context->LoadedImageSize),
                       (TargetHandle == ENTRY_HANDLE),
                       EfiReservedMemoryType,   /* always mark payload as reserved in e820/memmap */
+                      RAM_DISK_BLOCK_SIZE,
+                      (Context->Chain->IsMFTAH ? sizeof(mftah_payload_header_t) : 0),
                       Context->ProgressFunc));
     FreePool(PayloadPath);
 
@@ -503,7 +506,6 @@ LoaderMftahDecrypt(IN LOADER_CONTEXT *Context)
     Context->LoadedImageBase += sizeof(mftah_payload_header_t);
     Context->LoadedImageSize -= sizeof(mftah_payload_header_t);
 
-    MftahDestroy();
     return EFI_SUCCESS;
 }
 
@@ -536,6 +538,7 @@ LoaderDestroyContext(IN LOADER_CONTEXT *Context)
     FB->ClearScreen(FB, 0); FB->Flush(FB);
 
     FramebufferDestroy();
+    MftahDestroy();
 }
 
 

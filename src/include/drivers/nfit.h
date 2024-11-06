@@ -45,7 +45,7 @@ typedef
 struct {
     EFI_ACPI_DESCRIPTION_HEADER Header;
     UINT32                      Reserved;
-} _PACKED EFI_ACPI_SDT_NFIT;
+} __attribute__((packed)) EFI_ACPI_SDT_NFIT;
 
 typedef
 struct {
@@ -59,7 +59,7 @@ struct {
     UINT64      SystemPhysicalAddressRangeBase;
     UINT64      SystemPhysicalAddressRangeLength;
     UINT64      AddressRangeMemoryMappingAttribute;
-} _PACKED EFI_ACPI_NFIT_SPA_STRUCTURE;
+} __attribute__((packed)) EFI_ACPI_NFIT_SPA_STRUCTURE;
 
 
 

@@ -30,7 +30,7 @@ struct {
     BOUNDED_SHAPE   *TimeoutsLayer;
     CHAR8           NormalTimeoutText[128];
     CHAR8           MaxTimeoutText[128];
-} _PACKED
+} __attribute__((packed))
 GRAPHICS_CONTEXT;
 
 

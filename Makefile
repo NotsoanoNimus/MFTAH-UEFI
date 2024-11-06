@@ -54,17 +54,18 @@ TARGET			= MFTAH.EFI
 .PHONY: font
 .PHONY: debug
 .PHONY: all
+.PHONY: ramdisk_ssdt
 
 default: all
 
-clean:
+clean: clean-objs
 	-rm $(TARGET)* &>/dev/null
-	-rm $(OBJS) &>/dev/null
-	-rm $(PSF_SRC) &>/dev/null
 
 clean-objs:
 	-rm $(OBJS) &>/dev/null
 	-rm $(PSF_SRC) &>/dev/null
+	-rm $(SRC_DIR)/Ramdisk.aml
+	-rm $(SRC_DIR)/Ramdisk.aml.c
 
 # We can assume a 'clean' should be run on all .o files
 #   after the build completes. This is because compilation
@@ -74,7 +75,7 @@ debug: CFLAGS += -DEFI_DEBUG=1
 debug: TARGET = $(TARGET).DEBUG
 debug: $(TARGET) clean-objs
 
-all: $(SRC_DIR)/Ramdisk.aml.c $(TARGET) clean-objs
+all: $(SRC_DIR)/Ramdisk.aml.c $(TARGET)
 
 %.o: %.c
 	$(CXX) $(CFLAGS) -c -o $@ $<
@@ -89,6 +90,9 @@ font:
 #   for 'Ramdisk_aml' and a 'Ramdisk_aml_len'. These can then be
 #	referenced in other files as 'extern'.
 # NOTE: `xxd -i [FILE]` generated dynamic names, hence the complexity here.
+ramdisk_ssdt: $(SRC_DIR)/Ramdisk.aml.c
+	$(CXX) $(CFLAGS) -c -o $(SRC_DIR)/Ramdisk.aml.o $(SRC_DIR)/Ramdisk.aml.c
+
 $(SRC_DIR)/Ramdisk.aml.c: $(SRC_DIR)/Ramdisk.asl
 	iasl $(SRC_DIR)/Ramdisk.asl
 	echo "unsigned char NvdimmRootAml[] = {" >$(SRC_DIR)/Ramdisk.aml.c
@@ -100,6 +104,7 @@ $(SRC_DIR)/Ramdisk.aml.c: $(SRC_DIR)/Ramdisk.asl
 
 $(TARGET): font $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)
 	$(MAKE) -C . font
+	$(MAKE) -C . ramdisk_ssdt
 	$(CXX) $(LDFLAGS) -o $(TARGET) $(OBJS) $(SRC_DIR)/core/font.o $(LIBMFTAH)
 
 

@@ -20,22 +20,24 @@ ReadKey(OUT EFI_KEY_DATA *KeyData,
     if (TimeoutMilliseconds > 0) {
         /* Create a timeout event. */
         Status = uefi_call_wrapper(BS->CreateEvent, 5,
-                                   (EVT_TIMER),
+                                   EVT_TIMER,
                                    TPL_NOTIFY,
                                    NULL,
                                    NULL,
                                    &InputEvents[1]);
         if (EFI_ERROR(Status)) {
-            PANIC("Failed to create input timeout event.");
+            EFI_DANGERLN("Failed to create input timeout event (%u).", Status);
+            return Status;
         }
 
         Status = uefi_call_wrapper(BS->SetTimer, 3,
                                    InputEvents[1],
                                    TimerRelative,
-                                   TimeoutMilliseconds * 10 * 1000);
+                                   EFI_100NS_TO_MILLISECONDS(TimeoutMilliseconds));
         if (EFI_ERROR(Status)) {
             uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
-            PANIC("Failed to start input timeout timer.");
+            EFI_DANGERLN("Failed to start input timeout timer (%u).", Status);
+            return Status;
         }
     }
 
@@ -47,14 +49,20 @@ ReadKey(OUT EFI_KEY_DATA *KeyData,
         if (EFI_ERROR(Status) || NULL == STIEP) goto ReadKey__Fallback;
     }
 
+    /* Call both resets here regardless of which is used. */
     uefi_call_wrapper(STIEP->Reset, 2, STIEP, FALSE);
+    uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
 
-    while (TRUE) {
+    do {
         InputEvents[0] = STIEP->WaitForKeyEx;
-        ERRCHECK_UEFI(BS->WaitForEvent, 3,
-                      (TimeoutMilliseconds > 0 ? 2 : 1),
-                      InputEvents,
-                      &FiredEventIndex);
+
+        Status = uefi_call_wrapper(BS->WaitForEvent, 3,
+                                   (TimeoutMilliseconds > 0 ? 2 : 1),
+                                   InputEvents,
+                                   &FiredEventIndex);
+        if (EFI_ERROR(Status)) {
+            goto ReadKey__Fallback;
+        }
 
         if (1 == FiredEventIndex && TimeoutMilliseconds > 0) {
             /* The input event timed out. */
@@ -72,7 +80,7 @@ ReadKey(OUT EFI_KEY_DATA *KeyData,
         }
 
         break;
-    }
+    } while (TRUE);
 
     uefi_call_wrapper(STIEP->Reset, 2, STIEP, FALSE);
     goto ReadKey__Success;
@@ -83,10 +91,15 @@ ReadKey__Fallback:
 
     while (TRUE) {
         InputEvents[0] = ST->ConIn->WaitForKey;
-        ERRCHECK_UEFI(BS->WaitForEvent, 3,
-                      (TimeoutMilliseconds > 0 ? 2 : 1),
-                      InputEvents,
-                      &FiredEventIndex);
+
+        Status = uefi_call_wrapper(BS->WaitForEvent, 3,
+                                  (TimeoutMilliseconds > 0 ? 2 : 1),
+                                  InputEvents,
+                                  &FiredEventIndex);
+        if (EFI_ERROR(Status)) {
+            EFI_DANGERLN("Error awaiting fallback `WaitForKey` event (%u).", Status);
+            return Status;
+        }
 
         if (1 == FiredEventIndex && TimeoutMilliseconds > 0) {
             /* The input event timed out. */
@@ -101,6 +114,7 @@ ReadKey__Fallback:
             continue;
         } else if (EFI_ERROR(Status)) {
             uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            EFI_DANGERLN("Call to fallback `ReadKeyStroke` returned error code %u.", Status);
             return Status;
         }
 

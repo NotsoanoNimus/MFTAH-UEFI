@@ -97,6 +97,9 @@
 #define ERRCHECK_UEFI(x,y,...) \
     ERRCHECK(uefi_call_wrapper(x, y, ##__VA_ARGS__))
 
+/* Quick conversion of UEFI time slices (100ns) to milliseconds. */
+#define EFI_100NS_TO_MILLISECONDS(x)     (x * 10 * 1000)
+
 /* Macro for setting console colors quickly. */
 #define EFI_COLOR(x) \
     ST->ConOut->SetAttribute(ST->ConOut, (x));

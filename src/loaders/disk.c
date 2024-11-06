@@ -58,7 +58,10 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
         for (UINTN i = 0; i < HandlesCount; ++i) {
             EFI_DEVICE_PATH *p = DevicePathFromHandle(Handles[i]);
-            PRINTLN("   Candidate: %s", DevicePathToStr(p));
+            CHAR16 *CandidateDevPathStr = DevicePathToStr(p);
+
+            PRINTLN("   Candidate: %s", CandidateDevPathStr);
+            FreePool(CandidateDevPathStr);
 
             /* Compare the type, sub-type, and ramdisk starting address for the handle.
                See: https://uefi.org/specs/UEFI/2.10/10_Protocols_Device_Path_Protocol.html#ram-disk */
@@ -71,7 +74,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
                     )
                 ) RamdiskDeviceHandle = Handles[i];
 
-            FreePool(p);
             if (NULL != RamdiskDeviceHandle) break;
         }
 
@@ -92,8 +94,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
             PANIC("Could not locate an SFS handle for the loaded ramdisk.");
         }
     }
-
-    PRINTLN("Selected Device Path:\r\n   %s", DevicePathToStr(DevicePathFromHandle(RamdiskDeviceHandle)));
 
     CHAR16 *TargetPath = AsciiStrToUnicode(Context->Chain->TargetPath);
     if (NULL == TargetPath) {
@@ -117,17 +117,12 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
     Context->LoadedImageBase = (EFI_PHYSICAL_ADDRESS)NestedChainloadFileBuffer;
     Context->LoadedImageSize = NestedChainloadFileSize;
-PRINTLN("A");
+
     if (NULL != Context->LoadedImageDevicePath) {
         FreePool(Context->LoadedImageDevicePath);
     }
-PRINTLN("B");
     Context->LoadedImageDevicePath = FileDevicePath(RamdiskDeviceHandle, TargetPath);
-PRINTLN("C");
     FreePool(TargetPath);
-    uefi_call_wrapper(BS->Stall, 1, 20000000);
-
-    /* Let the EXE loader know that the ramdisk is the invocation point. */
 
     /* Ramdisks are a bit different: the sub-type loader is now called on the loaded image.
      * Even though the LoadedImage properties are changed on the chain from the loader context,

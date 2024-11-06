@@ -9,7 +9,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
 {
     EFI_STATUS Status = EFI_SUCCESS;
     EFI_HANDLE LoadedImageHandle = NULL;
-PRINTLN("EXE LOADER");
 
     /* This is relatively easy, just run the memory location in the context
         through LoadImage and StartImage Boot Services methods. */
@@ -24,12 +23,10 @@ PRINTLN("EXE LOADER");
         // TODO: More granular panics here so the user knows wth is going on.
         PANIC("LoadImage: Critical exception encountered while readying the in-memory image.");
     }
-PRINTLN("1");
 
     /* Clean up as many resources as we can think of. */
     // TODO: Trace all this. Tidy up.
     LoaderDestroyContext(Context);
-PRINTLN("2");
 
     /* We should not ever come back from here. */
     Status = uefi_call_wrapper(BS->StartImage, 3,

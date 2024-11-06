@@ -65,7 +65,7 @@ dkms.conf
 *.DEBUG
 
 # Auto-generated font blob from PSF
-./src/core/font.c
+*font.c
 
 # Auto-generated AML source file.
 *.aml.c

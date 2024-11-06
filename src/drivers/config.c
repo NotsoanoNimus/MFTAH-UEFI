@@ -87,6 +87,7 @@ DECL_HANDLER(display);
 DECL_HANDLER(automode);
 DECL_HANDLER(timeout);
 DECL_HANDLER(max_timeout);
+DECL_HANDLER(quick);
 DECL_HANDLER(banner);
 DECL_HANDLER(title);
 DECL_HANDLER(color_bg);
@@ -119,6 +120,7 @@ CONST CONFIG_HANDLER_TUPLE ConfigHandlers[] = {
     DECL_TUPLE(automode),
     DECL_TUPLE(timeout),
     DECL_TUPLE(max_timeout),
+    DECL_TUPLE(quick),
     DECL_TUPLE(banner),
     DECL_TUPLE(title),
     DECL_TUPLE(color_bg),
@@ -431,6 +433,7 @@ ConfigInit(VOID)
     Configuration.Banner            = "Select a payload to chainload.";
     Configuration.Mode              = GRAPHICAL;
     Configuration.AutoMode          = TRUE;
+    Configuration.Quick             = FALSE;
     Configuration.Scale             = 1;
     Configuration.Timeout           = 5 * 1000;
     Configuration.MaxTimeout        = 300 * 1000;
@@ -767,6 +770,15 @@ DECL_HANDLER(max_timeout)
     Configuration.MaxTimeout = MIN(60 * 60 * 1000, Configuration.MaxTimeout);
 
     DPRINTLN("MAX TIMEOUT SET TO %u MILLISECONDS.", Configuration.MaxTimeout);
+
+    return EFI_SUCCESS;
+}
+
+
+DECL_HANDLER(quick)
+{
+    Configuration.Quick = !!AsciiAtoi((CONST CHAR8 *)Data);
+    DPRINTLN("QUICK SET FOR CHAIN");
 
     return EFI_SUCCESS;
 }
@@ -1118,7 +1130,7 @@ DECL_HANDLER(mftahkey)
     }
 
     CopyMem(key, Data, Len);
-    Configuration.Chains[Configuration.ChainsLength]->TargetPath = key;
+    Configuration.Chains[Configuration.ChainsLength]->MFTAHKey = key;
     DPRINTLN("MFTAHKEY ALLOCATED AND SET.");
 
     return EFI_SUCCESS;

@@ -54,10 +54,6 @@ efi_main(EFI_HANDLE ImageHandle,
     /* Sleep for 1s to show the boot logo, because... because it just should, ok?? */
     uefi_call_wrapper(BS->Stall, 1, 1000000);
 
-    /* we do a lil debuggin round here */
-    // ConfigDump();
-    // uefi_call_wrapper(BS->Stall, 1, 10000000);
-
     /* Build and display the menu based on the configured mode. This is
         actually the point where the application will enter 'graphical'
         mode, if selected. The application will spin here until it's done. */

@@ -13,6 +13,11 @@ EFI_GUID gEfiRamdiskPersistentVirtualDiskGuid = EFI_PERSISTENT_VIRTUAL_DISK_GUID
 EFI_GUID gEfiRamdiskPersistentVirtualCdGuid = EFI_PERSISTENT_VIRTUAL_CD_GUID;
 
 
+STATIC
+UINTN
+RamdiskCurrentInstance = 0xBFA0;
+
+
 
 /* Handle for the EFI_RAM_DISK_PROTOCOL instance. */
 EFI_RAM_DISK_PROTOCOL
@@ -246,6 +251,10 @@ RamDiskRegister(IN UINT64 RamDiskBase,
     CopyMem(&PrivateData->TypeGuid, RamDiskType, sizeof(EFI_GUID));
     PrivateData->StartingAddr = RamDiskBase;
     PrivateData->Size         = RamDiskSize;
+
+    /* Set an incremental ramdisk instance number to identify it in device paths. */
+    ++RamdiskCurrentInstance;
+    PrivateData->InstanceNumber = RamdiskCurrentInstance;
 
     /* Generate device path information for the ramdisk. */
     RamDiskDevNode = (MEDIA_RAMDISK_DEVICE_PATH *)AllocateZeroPool(sizeof(MEDIA_RAMDISK_DEVICE_PATH));

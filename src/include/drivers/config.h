@@ -70,6 +70,7 @@ struct {
     CHAR8               *Title;
     DISPLAY_MODE        Mode;
     BOOLEAN             AutoMode;
+    BOOLEAN             Quick;
     CONFIG_COLORS       Colors;
     UINT8               Scale;
     UINTN               Timeout;

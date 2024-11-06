@@ -53,6 +53,8 @@ STATIC BOUNDED_SHAPE *LoadingIconUnderlayBlt,
 STATIC COLOR_PAIR ProgressBarColors = {0},
                   TextColors = {0};
 
+STATIC BOOLEAN IsQuick = FALSE;
+
 STATIC CONST CHAR8 *ProgressStatusMessage = NULL,
                    *InputErrorMessage = NULL;
 
@@ -155,6 +157,8 @@ Stall_GraphicalMode(UINTN TimeInMilliseconds)
     VOLATILE BOOLEAN Stall = TRUE;
     EFI_EVENT StallEvent = {0};
 
+    if (TRUE == IsQuick) return;
+
     uefi_call_wrapper(BS->CreateEvent, 5, (EVT_TIMER | EVT_NOTIFY_SIGNAL), TPL_NOTIFY, FlipToFalse, (VOID *)&Stall, &StallEvent);
     uefi_call_wrapper(BS->SetTimer, 3, StallEvent, TimerPeriodic, 10 * 1000 * TimeInMilliseconds);
 
@@ -173,6 +177,8 @@ VOID
 Stall_TextMode(UINTN TimeInMilliseconds)
 {
     // TODO: Is it possible to make an entropy-based text animation?
+    if (TRUE == IsQuick) return;
+
     uefi_call_wrapper(BS->Stall, 1, TimeInMilliseconds * 1000);
 }
 
@@ -364,6 +370,14 @@ LoaderGetAndValidateMftahKey(IN LOADER_CONTEXT *Context)
         EFI_DANGERLN("Failed to create a MFTAH payload meta object.");
         FreePool(Context->MftahPayloadWrapper);
         return EFI_LOAD_ERROR;
+    }
+
+    if (NULL != Context->Chain->MFTAHKey && 0 < AsciiStrLen(Context->Chain->MFTAHKey)) {
+        /* NOTE: This will make the password validation on autoboots much slower, since
+            the HMAC is calculated before checking the password in the MFTAH `decrypt`
+            method. But ehh, not a big deal. */
+        FreePool(Password);
+        return EFI_SUCCESS;
     }
 
     /* Set the 'cursor' to the base of the allocated space. */
@@ -560,6 +574,7 @@ LoaderEnterChain(IN CONFIGURATION *c,
     /* Just steal some colors from the palette. */
     ProgressBarColors = c->Colors.Title;
     TextColors = c->Colors.Text;
+    IsQuick = c->Quick;
 
     CONFIG_CHAIN_BLOCK *chain = (CONFIG_CHAIN_BLOCK *)AllocateZeroPool(sizeof(CONFIG_CHAIN_BLOCK));
     if (NULL == chain) {
@@ -678,11 +693,10 @@ LoaderEnterChain(IN CONFIGURATION *c,
         /* Clear the screen. */
         FB->ClearScreen(FB, 0); FB->Flush(FB);
 
-        if (NULL == chain->MFTAHKey || 0 == AsciiStrLen(chain->MFTAHKey)) {
-            /* Prompt for a password. */
-            if (EFI_ERROR((Status = LoaderGetAndValidateMftahKey(Context)))) {
-                LOADER_PANIC("Fatal exception while capturing MFTAH key.");
-            }
+        /* Prompt for a password if necessary. This also creates the MFTAH
+            payload wrapper object. */
+        if (EFI_ERROR((Status = LoaderGetAndValidateMftahKey(Context)))) {
+            LOADER_PANIC("Fatal exception while capturing MFTAH key.");
         }
 
         /* Clear the screen. */

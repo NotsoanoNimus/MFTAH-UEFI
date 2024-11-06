@@ -21,6 +21,8 @@ LoadImage(IN LOADER_CONTEXT *Context)
     EFI_STATUS Status = EFI_SUCCESS;
     EFI_DEVICE_PATH_PROTOCOL *RamdiskDevicePath = NULL;
     EFI_HANDLE RamdiskDeviceHandle = NULL;
+    UINTN HandlesCount = 0;
+    EFI_HANDLE *Handles = NULL;
     VOID *NestedChainloadFileBuffer = NULL;
     UINTN NestedChainloadFileSize = 0;
 
@@ -34,15 +36,64 @@ LoadImage(IN LOADER_CONTEXT *Context)
         PANIC("Could not register the loaded ramdisk through the active protocol.");
     }
 
+    PRINTLN("Ramdisk Device Path:\r\n   %s\r\n", DevicePathToStr(RamdiskDevicePath));
+
     /* Next, find the target image to chainload and load it to another segment of reserved memory. */
-    // TODO: This relies on the loaded ramdisk having a FAT partition or SFS in the first place. Is this ok?
     Status = uefi_call_wrapper(BS->LocateDevicePath, 3,
                                &gEfiSimpleFileSystemProtocolGuid,
                                (VOID **)&RamdiskDevicePath,
                                &RamdiskDeviceHandle);
+
     if (EFI_ERROR(Status)) {
-        PANIC("Could not find an SFS handle for the loaded ramdisk.");
+        /* Try an alternative, iterative method. */
+        Status = uefi_call_wrapper(BS->LocateHandleBuffer, 5,
+                                   ByProtocol,
+                                   &gEfiSimpleFileSystemProtocolGuid,
+                                   NULL,
+                                   &HandlesCount,
+                                   &Handles);
+        if (EFI_ERROR(Status) || NULL == Handles || 0 == HandlesCount) {
+            PANIC("Failed to retrieve a list of SFS handles to iterate.");
+        }
+
+        for (UINTN i = 0; i < HandlesCount; ++i) {
+            EFI_DEVICE_PATH *p = DevicePathFromHandle(Handles[i]);
+            PRINTLN("   Candidate: %s", DevicePathToStr(p));
+
+            /* Compare the type, sub-type, and ramdisk starting address for the handle.
+               See: https://uefi.org/specs/UEFI/2.10/10_Protocols_Device_Path_Protocol.html#ram-disk */
+            if (
+                    p->Type == RamdiskDevicePath->Type
+                    && p->SubType == RamdiskDevicePath->SubType
+                    && (
+                            ((MEDIA_RAMDISK_DEVICE_PATH *) RamdiskDevicePath)->Instance
+                            == ((MEDIA_RAMDISK_DEVICE_PATH *) p)->Instance
+                    )
+                ) RamdiskDeviceHandle = Handles[i];
+
+            FreePool(p);
+            if (NULL != RamdiskDeviceHandle) break;
+        }
+
+        FreePool(Handles);
+
+        if (NULL == RamdiskDeviceHandle) {
+            PANIC("Could not seek a matching handle for the loaded ramdisk.");
+        }
+
+        /* Try to convert the handle to an SFS instance. */
+        RamdiskDevicePath = DevicePathFromHandle(RamdiskDeviceHandle);
+        Status = uefi_call_wrapper(BS->LocateDevicePath, 3,
+                                   &gEfiSimpleFileSystemProtocolGuid,
+                                   (VOID **)&RamdiskDevicePath,
+                                   &RamdiskDeviceHandle);
+
+        if (EFI_ERROR(Status)) {
+            PANIC("Could not locate an SFS handle for the loaded ramdisk.");
+        }
     }
+
+    PRINTLN("Selected Device Path:\r\n   %s", DevicePathToStr(DevicePathFromHandle(RamdiskDeviceHandle)));
 
     CHAR16 *TargetPath = AsciiStrToUnicode(Context->Chain->TargetPath);
     if (NULL == TargetPath) {
@@ -66,12 +117,15 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
     Context->LoadedImageBase = (EFI_PHYSICAL_ADDRESS)NestedChainloadFileBuffer;
     Context->LoadedImageSize = NestedChainloadFileSize;
-
+PRINTLN("A");
     if (NULL != Context->LoadedImageDevicePath) {
         FreePool(Context->LoadedImageDevicePath);
     }
+PRINTLN("B");
     Context->LoadedImageDevicePath = FileDevicePath(RamdiskDeviceHandle, TargetPath);
+PRINTLN("C");
     FreePool(TargetPath);
+    uefi_call_wrapper(BS->Stall, 1, 20000000);
 
     /* Let the EXE loader know that the ramdisk is the invocation point. */
 

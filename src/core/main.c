@@ -52,7 +52,7 @@ efi_main(EFI_HANDLE ImageHandle,
     }
 
     /* Sleep for 1s to show the boot logo, because... because it just should, ok?? */
-    // uefi_call_wrapper(BS->Stall, 1, 1000000);
+    uefi_call_wrapper(BS->Stall, 1, 1000000);
 
     /* Build and display the menu based on the configured mode. This is
         actually the point where the application will enter 'graphical'
@@ -117,12 +117,12 @@ EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
     uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
     for (UINTN i = 0; i < 30; ++i) PRINT("\r\n");
 
-    // EFI_COLOR(MFTAH_COLOR_ASCII_ART);
-    // PRINTLN(
-    //     "\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>\r\n%s",
-    //     MFTAH_UEFI_VERSION, LIBMFTAH_VERSION, MftahAsciiArt
-    // );
-    // EFI_COLOR(MFTAH_COLOR_DEFAULT);
+    EFI_COLOR(MFTAH_COLOR_ASCII_ART);
+    PRINTLN(
+        "\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>\r\n%s",
+        MFTAH_UEFI_VERSION, LIBMFTAH_VERSION, MftahAsciiArt
+    );
+    EFI_COLOR(MFTAH_COLOR_DEFAULT);
 
     /* All drivers are initialized before the configuration is parsed. This
         means that they are all REQUIRED regardless of selected options. */

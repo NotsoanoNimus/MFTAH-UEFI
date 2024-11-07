@@ -86,26 +86,20 @@ font:
 	$(CXX) $(CFLAGS) -c -o $(SRC_DIR)/core/font.o $(PSF_SRC)
 
 
-# The resulting C file will contain a byte array definition (u-char)
-#   for 'Ramdisk_aml' and a 'Ramdisk_aml_len'. These can then be
-#	referenced in other files as 'extern'.
-# NOTE: `xxd -i [FILE]` generated dynamic names, hence the complexity here.
 ramdisk_ssdt: $(SRC_DIR)/Ramdisk.aml.c
 	$(CXX) $(CFLAGS) -c -o $(SRC_DIR)/Ramdisk.aml.o $(SRC_DIR)/Ramdisk.aml.c
 
 $(SRC_DIR)/Ramdisk.aml.c: $(SRC_DIR)/Ramdisk.asl
 	iasl $(SRC_DIR)/Ramdisk.asl
-	echo "unsigned char NvdimmRootAml[] = {" >$(SRC_DIR)/Ramdisk.aml.c
+	echo "unsigned char __attribute__((aligned(8))) NvdimmRootAml[] = {" >$(SRC_DIR)/Ramdisk.aml.c
 	cat $(SRC_DIR)/Ramdisk.aml | xxd -i >>$(SRC_DIR)/Ramdisk.aml.c
 	echo -ne "};\nunsigned int NvdimmRootAmlLength = " >>$(SRC_DIR)/Ramdisk.aml.c
 	wc -c $(SRC_DIR)/Ramdisk.aml | cut -d' ' -f1 | tr -d '\n' >>$(SRC_DIR)/Ramdisk.aml.c
 	echo ";" >>$(SRC_DIR)/Ramdisk.aml.c
 
 
-$(TARGET): font $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)
-	$(MAKE) -C . font
-	$(MAKE) -C . ramdisk_ssdt
-	$(CXX) $(LDFLAGS) -o $(TARGET) $(OBJS) $(SRC_DIR)/core/font.o $(LIBMFTAH)
+$(TARGET): font ramdisk_ssdt $(SRC_DIR)/Ramdisk.aml.o $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)
+	$(CXX) $(LDFLAGS) -o $(TARGET) $(SRC_DIR)/core/font.o $(SRC_DIR)/Ramdisk.aml.o $(OBJS) $(LIBMFTAH)
 
 
 # README dependency ensures the submodule is cloned 'properly'.

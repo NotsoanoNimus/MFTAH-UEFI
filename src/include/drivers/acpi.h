@@ -14,18 +14,20 @@ typedef VOID *  EFI_ACPI_HANDLE;
 typedef UINT32  EFI_ACPI_DATA_TYPE;
 
 
-/* ACPI Common Description Table Header */
+/* ACPI Common Description Table Header. Note that the weird byte arrays
+    are necessary for alignment to be correct when iterating ACPI tables
+    in 64-bit mode. */
 typedef
 struct _EFI_ACPI_DESCRIPTION_HEADER {
     UINT32  Signature;
     UINT32  Length;
     UINT8   Revision;
     UINT8   Checksum;
-    UINT8   OemId[6];
-    UINT64  OemTableId;
-    UINT32  OemRevision;
-    UINT32  CreatorId;
-    UINT32  CreatorRevision;
+    UINT8   OemId           [6];
+    UINT8   OemTableId      [8];
+    UINT8   OemRevision     [4];
+    UINT8   CreatorId       [4];
+    UINT8   CreatorRevision [4];
 } __attribute__((packed)) EFI_ACPI_DESCRIPTION_HEADER;
 /*************************************/
 

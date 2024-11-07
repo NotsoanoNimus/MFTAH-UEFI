@@ -12,13 +12,13 @@ EFI_GUID gEfiRamdiskVirtualCdGuid = EFI_VIRTUAL_CD_GUID;
 EFI_GUID gEfiRamdiskPersistentVirtualDiskGuid = EFI_PERSISTENT_VIRTUAL_DISK_GUID;
 EFI_GUID gEfiRamdiskPersistentVirtualCdGuid = EFI_PERSISTENT_VIRTUAL_CD_GUID;
 
-EXTERN unsigned char NvdimmRootAml[];
-EXTERN unsigned int NvdimmRootAmlLength;
+/* Instance counter for registered ramdisks. Just makes the ID non-zero. */
+STATIC UINTN RamdiskCurrentInstance = 0xBFA0;
 
-
-STATIC
-UINTN
-RamdiskCurrentInstance = 0xBFA0;
+/* External references for the NVDIMM Root Device AML bytecode. */
+// TODO! See below. Can't get this to work.
+// EXTERN unsigned char NvdimmRootAml[];
+// EXTERN unsigned int NvdimmRootAmlLength;
 
 
 
@@ -85,16 +85,32 @@ STATIC
 EFI_STATUS
 RamDiskPublishSsdt(VOID)
 {
+    EFI_STATUS Status;
     UINTN DummySsdtTableKey = 0;   /* don't care about preserving this returned value */
     EFI_ACPI_TABLE_PROTOCOL *ACPI = AcpiGetInstance();
 
     if (NULL == ACPI) return EFI_DEVICE_ERROR;
 
-    return uefi_call_wrapper(ACPI->InstallAcpiTable, 4,
-                             ACPI,
-                             NvdimmRootAml,
-                             NvdimmRootAmlLength,
-                             &DummySsdtTableKey);
+    // TODO: I give up. Not wasting any more time on this atm. Just inline this shit.
+    /* Taken directly from compiled ASL code at `src/Ramdisk.asl`. */
+    unsigned char NvdimmRootAml[] = {
+        0x53, 0x53, 0x44, 0x54, 0x7c, 0x00, 0x00, 0x00, 0x02, 0xb4, 0x4d, 0x46,
+        0x54, 0x41, 0x48, 0x20, 0x52, 0x61, 0x6d, 0x44, 0x69, 0x73, 0x6b, 0x20,
+        0x00, 0x10, 0x00, 0x00, 0x49, 0x4e, 0x54, 0x4c, 0x29, 0x06, 0x18, 0x20,
+        0x10, 0x47, 0x05, 0x5c, 0x5f, 0x53, 0x42, 0x5f, 0x5b, 0x82, 0x4e, 0x04,
+        0x4e, 0x56, 0x44, 0x52, 0x08, 0x5f, 0x48, 0x49, 0x44, 0x0d, 0x41, 0x43,
+        0x50, 0x49, 0x30, 0x30, 0x31, 0x32, 0x00, 0x08, 0x5f, 0x53, 0x54, 0x52,
+        0x11, 0x29, 0x0a, 0x26, 0x4e, 0x00, 0x56, 0x00, 0x44, 0x00, 0x49, 0x00,
+        0x4d, 0x00, 0x4d, 0x00, 0x20, 0x00, 0x52, 0x00, 0x6f, 0x00, 0x6f, 0x00,
+        0x74, 0x00, 0x20, 0x00, 0x44, 0x00, 0x65, 0x00, 0x76, 0x00, 0x69, 0x00,
+        0x63, 0x00, 0x65, 0x00, 0x00, 0x00, 0x14, 0x09, 0x5f, 0x53, 0x54, 0x41,
+        0x00, 0xa4, 0x0a, 0x0f
+    };
+
+    return ACPI->InstallAcpiTable(ACPI,
+                                  (VOID *)(&NvdimmRootAml[0]),
+                                  sizeof(NvdimmRootAml),
+                                  &DummySsdtTableKey);
 }
 
 
@@ -134,36 +150,38 @@ RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
     SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)
         ((EFI_PHYSICAL_ADDRESS)Nfit + sizeof(EFI_ACPI_SDT_NFIT));
 
-    UINT8 PcdAcpiDefaultOemId[6] = { 'M', 'F', 'T', 'A', 'H', ' ' };
+    UINT32 MftahReleaseDate = EFI_SWAP_ENDIAN_32(MFTAH_RELEASE_DATE);
+    UINT8 MftahCreatorId[4] = MFTAH_CREATOR_ID;
+    UINT8 MftahOemTableId[8] = MFTAH_OEM_TABLE_ID;
+    UINT8 MftahOemId[6] = MFTAH_OEM_ID;
 
-    NfitHeader                  = (EFI_ACPI_DESCRIPTION_HEADER *)Nfit;
-    NfitHeader->Signature       = EFI_ACPI_NFIT_SIGNATURE;
-    NfitHeader->Length          = NfitLen;
-    NfitHeader->Revision        = EFI_ACPI_NFIT_REVISION;
-    NfitHeader->OemRevision     = MFTAH_RELEASE_DATE;   /* OEM Revision by some MFTAH release date. */
-    NfitHeader->CreatorId       = MFTAH_CREATOR_ID;
-    NfitHeader->CreatorRevision = 0x1;   /* Should always be 1. */
-    NfitHeader->OemTableId      = MFTAH_OEM_TABLE_ID;
-    CopyMem(NfitHeader->OemId, PcdAcpiDefaultOemId, sizeof(NfitHeader->OemId));
+    NfitHeader                          = (EFI_ACPI_DESCRIPTION_HEADER *)Nfit;
+    NfitHeader->Signature               = EFI_ACPI_NFIT_SIGNATURE;
+    NfitHeader->Length                  = NfitLen;
+    NfitHeader->Revision                = EFI_ACPI_NFIT_REVISION;
+    NfitHeader->CreatorRevision[0]      = 0x1;   /* Should always just be 1. */
+    CopyMem(NfitHeader->OemRevision,    &MftahReleaseDate,  4);
+    CopyMem(NfitHeader->CreatorId,      &MftahCreatorId,    4);
+    CopyMem(NfitHeader->OemTableId,     &MftahOemTableId,   8);
+    CopyMem(NfitHeader->OemId,          &MftahOemId,        6);
 
     /* Fill in the content of the SPA Range Structure. */
-    SpaRange->Type                             = NFIT_TABLE_TYPE_SPA;
-    SpaRange->Length                           = sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
-    SpaRange->SystemPhysicalAddressRangeBase   = PrivateData->StartingAddr;
-    SpaRange->SystemPhysicalAddressRangeLength = PrivateData->Size;
-    CopyMem(&SpaRange->AddressRangeTypeGUID, &PrivateData->TypeGuid, sizeof(EFI_GUID));
+    SpaRange->Type                              = NFIT_TABLE_TYPE_SPA;
+    SpaRange->Length                            = sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
+    SpaRange->SystemPhysicalAddressRangeBase    = PrivateData->StartingAddr;
+    SpaRange->SystemPhysicalAddressRangeLength  = PrivateData->Size;
+    CopyMem(&SpaRange->AddressRangeTypeGUID,    &PrivateData->TypeGuid, sizeof(EFI_GUID));
 
     /* Finally, calculate the checksum of the NFIT table. */
     AcpiChecksumTable((EFI_ACPI_DESCRIPTION_HEADER *)Nfit);
 
     /* Publish the NFIT to the ACPI table. */
-    Status = uefi_call_wrapper(ACPI->InstallAcpiTable, 4,
-                               ACPI,
-                               Nfit,
-                               NfitHeader->Length,
-                               &TableKey);
+    Status = ACPI->InstallAcpiTable(ACPI,
+                                    Nfit,
+                                    NfitLen,
+                                    &TableKey);
 
-    // FreePool(Nfit);
+    FreePool(Nfit);
     return Status;
 }
 

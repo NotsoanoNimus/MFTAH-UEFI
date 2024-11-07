@@ -32,8 +32,9 @@
 #define c8p         (CHAR8 *)
 
 /* Various IDs for ACPI entries inserted at runtime. */
-#define MFTAH_CREATOR_ID    EFI_SIGNATURE_32('X', 'M', 'I', 'T')   /* Creator: 'XMIT' */
-#define MFTAH_OEM_TABLE_ID  EFI_SIGNATURE_64('M', 'F', 'T', 'A', 'H', 'N', 'V', 'D')
+#define MFTAH_CREATOR_ID    { 'X', 'M', 'I', 'T' }   /* Creator: 'XMIT' */
+#define MFTAH_OEM_TABLE_ID  { 'M', 'F', 'T', 'A', 'H', 'N', 'V', 'D' }
+#define MFTAH_OEM_ID        { 'M', 'F', 'T', 'A', 'H', ' ' }
 
 /* The GUID that represents the developer (in this case, my personal site). */
 #define XMIT_XYZ_VENDOR_GUID \
@@ -83,6 +84,10 @@
 #define EFI_MENU_GO_BACK            0xd000000000000123
 
 #define EFI_INVALID_PASSWORD        0xd000000000000bad
+
+
+#define EFI_SWAP_ENDIAN_32(x) \
+    ((((x) & 0xFF) << 24) | (((x) & 0xFF00) << 8) | (((x) & 0xFF0000) >> 8) | (((x) & 0xFF000000) >> 24))
 
 
 /* "Error check" macro. Returns the EFI_STATUS if it's not EFI_SUCCESS. */

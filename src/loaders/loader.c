@@ -289,7 +289,10 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
         at = 50; Context->ProgressFunc(&at, &total, NULL);
         Context->StallFunc(500);
 
-        ERRCHECK(GetFileSystemHandleByVolumeName(VolumeName, &TargetHandle));
+        Status = GetFileSystemHandleByVolumeName(VolumeName, &TargetHandle);
+        FreePool(VolumeName);
+
+        if (EFI_ERROR(Status)) return Status;
     }
 
     /* Set the context's device handle for chainloaded images,

@@ -15,6 +15,12 @@ EFI_GUID gEfiRamdiskPersistentVirtualCdGuid = EFI_PERSISTENT_VIRTUAL_CD_GUID;
 /* Instance counter for registered ramdisks. Just makes the ID non-zero. */
 STATIC UINTN RamdiskCurrentInstance = 0xBFA0;
 
+/* Track the running contents of the NFIT table.
+    Used to expand as more ramdisks are loaded. */
+STATIC VOID     *RamdiskNfit        = NULL;
+STATIC UINT32   RamdiskNfitLength   = 0;
+STATIC UINTN    RamdiskAcpiTableKey = 0;
+
 /* External references for the NVDIMM Root Device AML bytecode. */
 // TODO! See below. Can't get this to work.
 // EXTERN unsigned char NvdimmRootAml[];
@@ -127,62 +133,87 @@ RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
 {
     EFI_STATUS Status = EFI_SUCCESS;
     EFI_ACPI_TABLE_PROTOCOL *ACPI;
-    UINTN TableKey;
     EFI_ACPI_DESCRIPTION_HEADER *NfitHeader;
     EFI_ACPI_NFIT_SPA_STRUCTURE *SpaRange;
-    VOID *Nfit;
-    UINT32 NfitLen;
-
-    /* Assume that if no NFIT is in the ACPI table, then there is no NVDIMM Root Device. */
-    /* TODO! Determine if one exists already and append the SPA. */
-    Status = RamDiskPublishSsdt();
-    if (EFI_ERROR(Status)) return Status;
 
     ACPI = AcpiGetInstance();
     if (NULL == ACPI) {
         return EFI_NOT_FOUND;
     }
 
-    NfitLen = sizeof(EFI_ACPI_SDT_NFIT) + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
-    Nfit = AllocateZeroPool(NfitLen);
-    if (NULL == Nfit) return EFI_OUT_OF_RESOURCES;
+    /* On first init, create the initial NFIT structure. */
+    if (NULL == RamdiskNfit) {
+        /* Assume that if no NFIT is in the ACPI table, then there is no NVDIMM Root Device. */
+        /* TODO! Determine if one exists already and append the SPA. */
+        ERRCHECK(RamDiskPublishSsdt());
 
-    SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)
-        ((EFI_PHYSICAL_ADDRESS)Nfit + sizeof(EFI_ACPI_SDT_NFIT));
+        RamdiskNfitLength = sizeof(EFI_ACPI_SDT_NFIT) + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
+        RamdiskNfit = AllocateZeroPool(RamdiskNfitLength);
+        if (NULL == RamdiskNfit) return EFI_OUT_OF_RESOURCES;
 
-    UINT32 MftahReleaseDate = EFI_SWAP_ENDIAN_32(MFTAH_RELEASE_DATE);
-    UINT8 MftahCreatorId[4] = MFTAH_CREATOR_ID;
-    UINT8 MftahOemTableId[8] = MFTAH_OEM_TABLE_ID;
-    UINT8 MftahOemId[6] = MFTAH_OEM_ID;
+        SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)
+            ((EFI_PHYSICAL_ADDRESS)RamdiskNfit + sizeof(EFI_ACPI_SDT_NFIT));
 
-    NfitHeader                          = (EFI_ACPI_DESCRIPTION_HEADER *)Nfit;
-    NfitHeader->Signature               = EFI_ACPI_NFIT_SIGNATURE;
-    NfitHeader->Length                  = NfitLen;
-    NfitHeader->Revision                = EFI_ACPI_NFIT_REVISION;
-    NfitHeader->CreatorRevision[0]      = 0x1;   /* Should always just be 1. */
-    CopyMem(NfitHeader->OemRevision,    &MftahReleaseDate,  4);
-    CopyMem(NfitHeader->CreatorId,      &MftahCreatorId,    4);
-    CopyMem(NfitHeader->OemTableId,     &MftahOemTableId,   8);
-    CopyMem(NfitHeader->OemId,          &MftahOemId,        6);
+        UINT32 MftahReleaseDate = EFI_SWAP_ENDIAN_32(MFTAH_RELEASE_DATE);
+        UINT8 MftahCreatorId[4] = MFTAH_CREATOR_ID;
+        UINT8 MftahOemTableId[8] = MFTAH_OEM_TABLE_ID;
+        UINT8 MftahOemId[6] = MFTAH_OEM_ID;
 
-    /* Fill in the content of the SPA Range Structure. */
-    SpaRange->Type                              = NFIT_TABLE_TYPE_SPA;
-    SpaRange->Length                            = sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
-    SpaRange->SystemPhysicalAddressRangeBase    = PrivateData->StartingAddr;
-    SpaRange->SystemPhysicalAddressRangeLength  = PrivateData->Size;
-    CopyMem(&SpaRange->AddressRangeTypeGUID,    &PrivateData->TypeGuid, sizeof(EFI_GUID));
+        /* Fill out the base NFIT descriptor table. */
+        NfitHeader                          = (EFI_ACPI_DESCRIPTION_HEADER *)RamdiskNfit;
+        NfitHeader->Signature               = EFI_ACPI_NFIT_SIGNATURE;
+        NfitHeader->Length                  = RamdiskNfitLength;
+        NfitHeader->Revision                = EFI_ACPI_NFIT_REVISION;
+        NfitHeader->CreatorRevision[0]      = 0x1;   /* Should always just be 1. */
+        CopyMem(NfitHeader->OemRevision,    &MftahReleaseDate,  4);
+        CopyMem(NfitHeader->CreatorId,      &MftahCreatorId,    4);
+        CopyMem(NfitHeader->OemTableId,     &MftahOemTableId,   8);
+        CopyMem(NfitHeader->OemId,          &MftahOemId,        6);
+
+        /* Fill in the content of the first SPA Range Structure. */
+        SpaRange->Type                              = NFIT_TABLE_TYPE_SPA;
+        SpaRange->Length                            = sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
+        SpaRange->SystemPhysicalAddressRangeBase    = PrivateData->StartingAddr;
+        SpaRange->SystemPhysicalAddressRangeLength  = PrivateData->Size;
+        CopyMem(&SpaRange->AddressRangeTypeGUID,    &PrivateData->TypeGuid, sizeof(EFI_GUID));
+    } else {
+        /* Adding an additional SPA entry to the ramdisks list. */
+        VOID *RamdiskNfitRealloc =
+            AllocateZeroPool(RamdiskNfitLength + sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE));
+        if (NULL == RamdiskNfitRealloc) return EFI_OUT_OF_RESOURCES;
+
+        CopyMem(RamdiskNfitRealloc, RamdiskNfit, RamdiskNfitLength);
+        FreePool(RamdiskNfit);
+
+        /* Adjust for new ramdisk. */
+        RamdiskNfit = RamdiskNfitRealloc;
+        RamdiskNfitLength += sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
+
+        /* Remove the old NFIT entry. */
+        ACPI->UninstallAcpiTable(ACPI, RamdiskAcpiTableKey);
+
+        /* Build a new SPA entry onto the end of the list. */
+        SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)
+            ((EFI_PHYSICAL_ADDRESS)RamdiskNfit + RamdiskNfitLength);
+
+        SpaRange->Type                              = NFIT_TABLE_TYPE_SPA;
+        SpaRange->Length                            = sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
+        SpaRange->SystemPhysicalAddressRangeBase    = PrivateData->StartingAddr;
+        SpaRange->SystemPhysicalAddressRangeLength  = PrivateData->Size;
+        CopyMem(&SpaRange->AddressRangeTypeGUID,    &PrivateData->TypeGuid, sizeof(EFI_GUID));
+
+        NfitHeader = (EFI_ACPI_DESCRIPTION_HEADER *)RamdiskNfit;
+        NfitHeader->Length = RamdiskNfitLength;
+    }
 
     /* Finally, calculate the checksum of the NFIT table. */
-    AcpiChecksumTable((EFI_ACPI_DESCRIPTION_HEADER *)Nfit);
+    AcpiChecksumTable((EFI_ACPI_DESCRIPTION_HEADER *)RamdiskNfit);
 
-    /* Publish the NFIT to the ACPI table. */
-    Status = ACPI->InstallAcpiTable(ACPI,
-                                    Nfit,
-                                    NfitLen,
-                                    &TableKey);
-
-    FreePool(Nfit);
-    return Status;
+    /* Publish the NFIT to the ACPI table and capture the table key. */
+    return ACPI->InstallAcpiTable(ACPI,
+                                  RamdiskNfit,
+                                  RamdiskNfitLength,
+                                  &RamdiskAcpiTableKey);
 }
 
 

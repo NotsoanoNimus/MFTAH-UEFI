@@ -82,6 +82,23 @@ GetFileSystemHandleByVolumeName(
 
 
 /**
+ * Securely wipe a buffer's data by passing it several times with alternating bit patterns.
+ * 
+ * @param[in]   Buffer  The buffer to clear.
+ * @param[in]   Length  The length of the buffer.
+ * 
+ * @returns Nothing.
+ */
+VOID
+EFIAPI
+__attribute__((optnone))
+SecureWipe(
+    IN  VOID    *Buffer,
+    IN  UINTN   Length
+);
+
+
+/**
  * Generic shutdown function. Panics if a shutdown could not be completed.
  * 
  * @param[in]   Reason  Set to EFI_SUCCESS to indicate a normal shutdown. \

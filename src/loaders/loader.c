@@ -368,7 +368,7 @@ LoaderGetAndValidateMftahKey(IN LOADER_CONTEXT *Context)
     }
 
     MftahStatus = MftahProtocol->create_payload(MftahProtocol,
-                                                (immutable_ref_t )Context->LoadedImageBase,
+                                                (immutable_ref_t)Context->LoadedImageBase,
                                                 (size_t)Context->LoadedImageSize,
                                                 Context->MftahPayloadWrapper,
                                                 NULL);
@@ -508,6 +508,9 @@ LoaderMftahDecrypt(IN LOADER_CONTEXT *Context)
     /* Now that the payload is decrypted, lop off the initial 128-byte header and adjust. */
     Context->LoadedImageBase += sizeof(mftah_payload_header_t);
     Context->LoadedImageSize -= sizeof(mftah_payload_header_t);
+
+    /* Clear the MFTAH Key location several times with garbage data. Freed later upon de-init. */
+    SecureWipe(Context->Chain->MFTAHKey, AsciiStrLen(Context->Chain->MFTAHKey));
 
     return EFI_SUCCESS;
 }

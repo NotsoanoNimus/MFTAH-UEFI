@@ -253,6 +253,17 @@ GetFileSystemHandleByVolumeName(IN CHAR16 *VolumeName,
 
 VOID
 EFIAPI
+__attribute__((optnone))
+SecureWipe(IN VOID *Buffer,
+           IN UINTN Length)
+{
+    for (UINTN i = 0; i < 3; ++i) SetMem(Buffer, Length, 0xA5);   /* 10100101 */
+    for (UINTN i = 0; i < 3; ++i) SetMem(Buffer, Length, 0x5A);   /* 01011010 */
+}
+
+
+VOID
+EFIAPI
 Shutdown(IN CONST EFI_STATUS Reason)
 {
     EFI_STATUS Status = uefi_call_wrapper(

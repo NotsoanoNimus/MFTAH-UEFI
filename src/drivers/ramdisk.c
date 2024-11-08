@@ -183,18 +183,17 @@ RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
         if (NULL == RamdiskNfitRealloc) return EFI_OUT_OF_RESOURCES;
 
         CopyMem(RamdiskNfitRealloc, RamdiskNfit, RamdiskNfitLength);
-        FreePool(RamdiskNfit);
-
-        /* Adjust for new ramdisk. */
-        RamdiskNfit = RamdiskNfitRealloc;
-        RamdiskNfitLength += sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
 
         /* Remove the old NFIT entry. */
-        ACPI->UninstallAcpiTable(ACPI, RamdiskAcpiTableKey);
+        Status = ACPI->UninstallAcpiTable(ACPI, RamdiskAcpiTableKey);
+        if (EFI_ERROR(Status)) {
+            EFI_DANGERLN("WARNING: RAMDISK:  Failed to remove previous ACPI NFIT table (%u).", Status);
+            return Status;
+        }
 
         /* Build a new SPA entry onto the end of the list. */
         SpaRange = (EFI_ACPI_NFIT_SPA_STRUCTURE *)
-            ((EFI_PHYSICAL_ADDRESS)RamdiskNfit + RamdiskNfitLength);
+            ((EFI_PHYSICAL_ADDRESS)RamdiskNfitRealloc + RamdiskNfitLength);
 
         SpaRange->Type                              = NFIT_TABLE_TYPE_SPA;
         SpaRange->Length                            = sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
@@ -202,6 +201,12 @@ RamDiskPublishNfit(IN RAMDISK_PRIVATE_DATA *PrivateData)
         SpaRange->SystemPhysicalAddressRangeLength  = PrivateData->Size;
         CopyMem(&SpaRange->AddressRangeTypeGUID,    &PrivateData->TypeGuid, sizeof(EFI_GUID));
 
+        /* Adjust to the pointer for the new ramdisk. */
+        FreePool(RamdiskNfit);
+        RamdiskNfit = RamdiskNfitRealloc;
+        RamdiskNfitLength += sizeof(EFI_ACPI_NFIT_SPA_STRUCTURE);
+
+        /* Update NFIT's `Length` field. */
         NfitHeader = (EFI_ACPI_DESCRIPTION_HEADER *)RamdiskNfit;
         NfitHeader->Length = RamdiskNfitLength;
     }

@@ -114,6 +114,10 @@
 /* Same here. */
 #define PRINTLN(x, ...) \
     Print(L##x L"\r\n", ##__VA_ARGS__);
+#define VARPRINT(x) \
+    Print((x));
+#define VARPRINTLN(x) \
+    Print((x));
 
 /* Warning wrapper macros. */
 #define EFI_WARNING(x, ...) \
@@ -128,7 +132,7 @@
     EFI_DANGER(x, ##__VA_ARGS__); PRINTLN("\r\n");
 
 
-#if EFI_DEBUG==1
+#if EFI_DEBUG==0
 /* Debug-only. Prints debugging information when enabled by compiler flag. */
 #   define DPRINT(x, ...) \
         EFI_COLOR(MFTAH_COLOR_DEBUG); \

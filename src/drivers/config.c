@@ -3,8 +3,12 @@
 
 
 
-#define MAX_ELEMENT_LENGTH      32
-#define MAX_DEFINITION_LENGTH   4096
+/* Maximum length of a configuration element. */
+#define MAX_ELEMENT_LENGTH              32
+
+/* Maximum length of a configuration definition. */
+#define MAX_DEFINITION_LENGTH           4096
+
 
 /* Define this locally so all static methods can just reference it on ABORT. */
 STATIC EFI_STATUS Status = EFI_INVALID_PARAMETER;
@@ -109,6 +113,7 @@ DECL_HANDLER(subtype);
 DECL_HANDLER(mftah);
 DECL_HANDLER(mftahkey);
 DECL_HANDLER(default);
+DECL_HANDLER(data_ramdisk);
 
 
 /* A mapping of all possible config elements to each of their handlers.
@@ -142,6 +147,7 @@ CONST CONFIG_HANDLER_TUPLE ConfigHandlers[] = {
     DECL_TUPLE(mftah),
     DECL_TUPLE(mftahkey),
     DECL_TUPLE(default),
+    DECL_TUPLE(data_ramdisk),
     { NULL, NULL }   /* Terminal NULL entry marks end of list. */
 };
 
@@ -502,16 +508,21 @@ ConfigDump(VOID)
     PRINTLN("Chains(%u):", Configuration.ChainsLength);
     PRINTLN("---");
     for (UINTN i = 0; i < Configuration.ChainsLength; ++i) {
-        PRINTLN("   name(%a), payload(%a)",
-            Configuration.Chains[i]->Name ? Configuration.Chains[i]->Name : "NULL",
-            Configuration.Chains[i]->PayloadPath ? Configuration.Chains[i]->PayloadPath : "NULL");
-        PRINTLN("   target(%a), type(%u), mftah(%u), compressed(0)",
-            Configuration.Chains[i]->TargetPath ? Configuration.Chains[i]->TargetPath : "NULL",
-            Configuration.Chains[i]->Type,
-            !!(Configuration.Chains[i]->IsMFTAH));
-        PRINTLN("   default(%u), immediate(%u)",
-            !!(Configuration.Chains[i]->IsDefault),
-            !!(Configuration.Chains[i]->IsImmediate));
+        // PRINTLN("   name(%a), payload(%a)",
+        //     Configuration.Chains[i]->Name ? Configuration.Chains[i]->Name : "NULL",
+        //     Configuration.Chains[i]->PayloadPath ? Configuration.Chains[i]->PayloadPath : "NULL");
+        // PRINTLN("   target(%a), type(%u), mftah(%u), compressed(%u)",
+        //     Configuration.Chains[i]->TargetPath ? Configuration.Chains[i]->TargetPath : "NULL",
+        //     Configuration.Chains[i]->Type,
+        //     !!(Configuration.Chains[i]->IsMFTAH));
+        // PRINTLN("   default(%u), immediate(%u)",
+        //     !!(Configuration.Chains[i]->IsDefault),
+        //     !!(Configuration.Chains[i]->IsImmediate));
+        CHAR8 *Result = NULL;
+        CHAR16 *ResultConv = NULL;
+        ConfigDumpChain(Configuration.Chains[i], &Result);
+        ResultConv = AsciiStrToUnicode(Result);
+        VARPRINT(ResultConv);
         PRINTLN("---");
     }
 
@@ -525,14 +536,32 @@ ConfigDumpChain(IN CONFIG_CHAIN_BLOCK *Chain,
 {
     if (NULL == ToBuffer) return;
 
-    *ToBuffer = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (512 + 1));
+    CONST UINTN MaxBufferLength = 2048;
+    UINTN CurrentLength = 0;
+
+    *ToBuffer = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (MaxBufferLength + 1));
 
     AsciiSPrint(
-        (*ToBuffer), 512,
-        "Chain '%a':\n   payload(%a),\n   target(%a),\n   type(%u),  flags(%1u:%1u:%1u:%1u)",
-        Chain->Name, Chain->PayloadPath, Chain->TargetPath, Chain->Type,
-        Chain->IsMFTAH, 0, Chain->IsDefault, Chain->IsImmediate
+        (*ToBuffer),
+        MaxBufferLength,
+        "Chain '%a':\n   payload(%a),\n   target(%a),  type(%u),\n   flags(m%1u:c%1u:d%1u:n%1u),  data_ramdisks(%u)\n",
+            Chain->Name, Chain->PayloadPath, Chain->TargetPath, Chain->Type,
+            Chain->IsMFTAH, 0, Chain->IsDefault, Chain->IsImmediate, Chain->DataRamdisksLength
     );
+
+    for (UINTN i = 0; i < Chain->DataRamdisksLength; ++i) {
+        CurrentLength = AsciiStrLen(*ToBuffer);
+
+        if (CurrentLength >= MaxBufferLength) break;
+
+        AsciiSPrint(
+            (CHAR8 *)(((EFI_PHYSICAL_ADDRESS)(*ToBuffer)) + CurrentLength),
+            (MaxBufferLength - CurrentLength),
+            "   { path(%a),  mftah(%u),  compressed(%u),  has_key(%u) }\n",
+                Chain->DataRamdisks[i]->Path, Chain->DataRamdisks[i]->IsMFTAH,
+                Chain->DataRamdisks[i]->IsCompressed, (FALSE != Chain->DataRamdisks[i]->MFTAHKey)
+        );
+    }
 }
 
 
@@ -1150,5 +1179,122 @@ DECL_HANDLER(default)
         = !!AsciiAtoi((CONST CHAR8 *)Data);
     DPRINTLN("DEFAULT SET FOR CHAIN");
 
+    return EFI_SUCCESS;
+}
+
+
+DECL_HANDLER(data_ramdisk)
+{
+    if (!IsWithinChain) {
+        ErrorMsg = HackeneyedChainOnlyStr;
+        return EFI_INVALID_PARAMETER;
+    }
+
+    if (0 == AsciiStrLen(Data)) {
+        ErrorMsg = L"Empty data ramdisk details";
+        return EFI_NOT_STARTED;
+    }
+
+    CONFIG_CHAIN_BLOCK *ThisChain = Configuration.Chains[Configuration.ChainsLength];
+    DATA_RAMDISK **Target = &(ThisChain->DataRamdisks[ThisChain->DataRamdisksLength]);
+
+    if (ThisChain->DataRamdisksLength >= MAX_DATA_RAMDISKS_PER_CHAIN) {
+        ErrorMsg = L"Data ramdisks length limit exceeded";
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    (*Target) = (DATA_RAMDISK *)AllocateZeroPool(sizeof(DATA_RAMDISK));
+    if (NULL == (*Target)) {
+        ErrorMsg = L"Out of resources";
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    /* Now parse the data_ramdisk string format. A leading '$' indicates compression.
+        A leading '@[string]' or just '@' indicates the payload is MFTAH-encapsulated. */
+    DATA_RAMDISK *r = (*Target);
+    BOOLEAN CanStillSpecifyMftah = TRUE;
+    BOOLEAN CanStillSpecifyCompression = TRUE;
+    BOOLEAN CanStillSpecifyRequired = TRUE;
+    CHAR8 *p = Data, *s = Data, *x = NULL;
+
+    do {
+        switch (*p) {
+            case '!': {
+                if (FALSE == CanStillSpecifyRequired) goto DataRamdisk__default_case;
+
+                r->IsRequired = TRUE;
+                CanStillSpecifyRequired = FALSE;
+
+                break;
+            }
+            case '$': {
+                if (FALSE == CanStillSpecifyCompression) goto DataRamdisk__default_case;
+
+                r->IsCompressed = TRUE;
+                CanStillSpecifyCompression = FALSE;
+
+                break;
+            }
+            case '@': {
+                if (FALSE == CanStillSpecifyMftah) goto DataRamdisk__default_case;
+
+                if ('[' != *(p + 1)) {
+                    CanStillSpecifyMftah = FALSE;
+
+                    r->IsMFTAH = TRUE;
+                    r->MFTAHKey = NULL;
+
+                    break;
+                }
+
+                p += 2;   /* skip to first char of password */
+                x = p;
+
+                while (']' != *p && *p) ++p;
+
+                if (x == p) {
+                    ErrorMsg = L"Empty MFTAH key specification in data ramdisk";
+                    return EFI_NOT_FOUND;
+                } else if ('\0' == *p) {
+                    ErrorMsg = L"Invalid MFTAH key specification in data ramdisk";
+                    return EFI_ABORTED;
+                }
+
+                *p = '\0';   /* zero out the end bracket position */
+
+                /* Allocate the key string buffer using the length from `x` to the local end (p). */
+                r->MFTAHKey = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (AsciiStrLen(x) + 1));
+                if (NULL == r->MFTAHKey) {
+                    ErrorMsg = L"Cannot allocate MFTAH key string";
+                    return EFI_OUT_OF_RESOURCES;
+                }
+                CopyMem(r->MFTAHKey, x, AsciiStrLen(x));
+
+                /* At this point, `p` was equal to the end bracket position, so let it fall
+                    through to the ++p below to get to the next character. */
+                CanStillSpecifyMftah = FALSE;
+                break;
+            }
+            default:
+            DataRamdisk__default_case:
+                s = p;   /* move 'start' pointer to beginning of actual string */
+                break;
+        }
+
+        ++p;
+    } while (*p && s == Data);
+
+    /* Capture the intended path string. */
+    r->Path = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (AsciiStrLen(s) + 1));
+    if (NULL == r->Path) {
+        ErrorMsg = L"Cannot allocate data ramdisk path: out of resources";
+        return EFI_OUT_OF_RESOURCES;
+    }
+    CopyMem(r->Path, s, AsciiStrLen(s));
+
+    /* Be sure to increment the ramdisks count. */
+    (Configuration.Chains[Configuration.ChainsLength]->DataRamdisksLength)++;
+
+    /* All done. */
     return EFI_SUCCESS;
 }

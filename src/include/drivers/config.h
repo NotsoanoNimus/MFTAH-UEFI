@@ -9,6 +9,10 @@
     Change at your own risk: there's not really any scrolling atm. */
 #define CONFIG_MAX_CHAINS   16
 
+/* Maximum amount of data ramdisks to load per chain. */
+#define MAX_DATA_RAMDISKS_PER_CHAIN     8
+
+
 /* Possible chainload types available with MFTAH. */
 typedef
 enum {
@@ -22,19 +26,30 @@ enum {
     BIN     = (1 << 4),
 } CHAIN_TYPE;
 
+typedef
+struct {
+    BOOLEAN         IsMFTAH;
+    BOOLEAN         IsCompressed;
+    BOOLEAN         IsRequired;
+    CHAR8           *MFTAHKey;
+    CHAR8           *Path;
+} __attribute__((packed)) DATA_RAMDISK;
+
 /* Options representing a config 'chain' block. */
 typedef
 struct {
-    CHAR8       *Name;
-    CHAR8       *PayloadPath;
-    CHAR8       *TargetPath;   /* Inner EFI to chainload (for MFTAH_DISK types). */
-    CHAR8       *MFTAHKey;   /* Prefilled password (or filled by prompt). */
-    CHAIN_TYPE  Type;
-    CHAIN_TYPE  SubType;
-    BOOLEAN     IsMFTAH;
-    BOOLEAN     IsCompressed;
-    BOOLEAN     IsImmediate;
-    BOOLEAN     IsDefault;
+    CHAR8           *Name;
+    CHAR8           *PayloadPath;
+    CHAR8           *TargetPath;   /* Inner EFI to chainload (for MFTAH_DISK types). */
+    CHAR8           *MFTAHKey;   /* Prefilled password (or filled by prompt). */
+    CHAIN_TYPE      Type;
+    CHAIN_TYPE      SubType;
+    BOOLEAN         IsMFTAH;
+    BOOLEAN         IsCompressed;
+    BOOLEAN         IsImmediate;
+    BOOLEAN         IsDefault;
+    DATA_RAMDISK    *DataRamdisks[MAX_DATA_RAMDISKS_PER_CHAIN];
+    UINT8           DataRamdisksLength;
 } __attribute__((packed)) CONFIG_CHAIN_BLOCK;
 
 typedef

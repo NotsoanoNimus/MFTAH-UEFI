@@ -19,7 +19,7 @@ LoadImage(IN LOADER_CONTEXT *Context)
                                (VOID *)Context->LoadedImageBase,
                                Context->LoadedImageSize,
                                &LoadedImageHandle);
-    if (EFI_ERROR(Status)) {
+    if (EFI_ERROR(Status) || NULL == LoadedImageHandle) {
         // TODO: More granular panics here so the user knows wth is going on.
         PANIC("LoadImage: Critical exception encountered while readying the in-memory image.");
     }

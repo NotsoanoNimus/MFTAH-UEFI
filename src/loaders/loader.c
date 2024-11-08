@@ -334,6 +334,108 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
 }
 
 
+/* NOTE: This is almost a carbon copy of the above method. */
+STATIC
+EFIAPI
+EFI_STATUS
+LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
+                      IN LOADER_CONTEXT *Context)//,
+                    //   OUT VOID **LoadedRamdiskBase,
+                    //   OUT UINTN *LoadedRamdiskSize)
+{
+    if (
+        NULL == Ramdisk
+        || NULL == Ramdisk->Path
+        || 0 == AsciiStrLen(Ramdisk->Path)
+        // || NULL == LoadedRamdiskBase
+        // || NULL == LoadedRamdiskSize
+    ) return EFI_INVALID_PARAMETER;
+
+    EFI_STATUS Status = EFI_SUCCESS;
+    UINTN at = 0, total = 100;
+    VOID *LoadedRamdiskBase = NULL;
+    UINTN LoadedRamdiskSize = 0;
+    EFI_DEVICE_PATH_PROTOCOL *RamdiskDevicePath = NULL;
+
+    ProgressStatusMessage = "Locating Ramdisk...";
+    Context->ProgressFunc(&at, &total, NULL);
+    Context->StallFunc(500);
+
+    EFI_HANDLE TargetHandle = ENTRY_HANDLE;
+
+    // TODO abstract to function. Keep it DRY
+    CHAR8 *p = Ramdisk->Path;
+    CHAR8 *s = p;
+
+    for (; *p; ++p) {
+        if (':' == *p) {
+            s = p;
+            break;
+        }
+    }
+
+    if (s != Ramdisk->Path) {
+        *s = '\0';   /* terminate the string here */
+        ++s;   /* increment by one to set it to the filename */
+        if ('\0' == *s) return EFI_LOAD_ERROR;
+
+        /* Get the unicode version of the volume name string. */
+        CHAR16 *VolumeName = AsciiStrToUnicode(Ramdisk->Path);
+
+        ProgressStatusMessage = "Opening Volume...";
+        at = 50; Context->ProgressFunc(&at, &total, NULL);
+        Context->StallFunc(500);
+
+        Status = GetFileSystemHandleByVolumeName(VolumeName, &TargetHandle);
+        FreePool(VolumeName);
+
+        if (EFI_ERROR(Status)) return Status;
+    }
+
+    /* Do stuff with slight stalls between progress messages. */
+    ProgressStatusMessage = "Reading Ramdisk...";
+    at = 0; Context->ProgressFunc(&at, &total, NULL);
+    Context->StallFunc(500);
+
+    /* NOTE: Use the 's' starting point here because it's always set to the full file path. */
+    CHAR16 *PayloadPath = AsciiStrToUnicode(s);
+    if (NULL == PayloadPath) return EFI_OUT_OF_RESOURCES;
+
+    /* Convert the path separators to the m$ version ('\'). Not doing this
+        will cause `ReadFile` to return errors. */
+    for (CHAR16 *s = PayloadPath; *s; ++s) if (L'/' == *s) *s = L'\\';
+
+    ERRCHECK(ReadFile(TargetHandle,
+                      PayloadPath,
+                      0U,
+                      (UINT8 **)&LoadedRamdiskBase,
+                      &LoadedRamdiskSize,
+                      (TargetHandle == ENTRY_HANDLE),
+                      EfiReservedMemoryType,   /* always mark payload as reserved in e820/memmap */
+                      RAM_DISK_BLOCK_SIZE,
+                      (Ramdisk->IsMFTAH ? sizeof(mftah_payload_header_t) : 0),
+                      Context->ProgressFunc));
+    FreePool(PayloadPath);
+
+    // TODO: MFTAH decrypt & decompression -- these types of decorators need to be moved to a more generic function/place
+    ERRCHECK(
+        RAMDISK.Register((UINT64)LoadedRamdiskBase,
+                         (UINT64)LoadedRamdiskSize,
+                         &gEfiRamdiskVirtualDiskGuid,
+                         NULL,
+                         &RamdiskDevicePath)
+    );
+
+    /* Close out with a completed progress detail and a small stall. */
+    ProgressStatusMessage = "Loaded!";
+    at = total;
+    Context->ProgressFunc(&at, &total, NULL);
+    Context->StallFunc(1500);
+
+    return EFI_SUCCESS;
+}
+
+
 STATIC
 EFIAPI
 EFI_STATUS
@@ -723,6 +825,20 @@ LoaderEnterChain(IN CONFIGURATION *c,
         FB->ClearScreen(FB, 0); FB->Flush(FB);
         if (EFI_ERROR((Status = LoaderDecompress(Context)))) {
             LOADER_PANIC("Decompression returned an irrecoverable failure code.");
+        }
+    }
+
+    /* Load any data ramdisks that were specified in the chain.
+        NOTE: Failure to load these is not fatal unless otherwise specified. */
+    /* Clear the screen. */
+    // TODO compat w/ both modes
+    FB->ClearScreen(FB, 0); FB->Flush(FB);
+    for (UINTN i = 0; i < chain->DataRamdisksLength; ++i) {
+        DATA_RAMDISK *r = chain->DataRamdisks[i];
+
+        Status = LoaderReadDataRamdisk(r, Context);
+        if (EFI_ERROR(Status) && TRUE == r->IsRequired) {
+            PANIC("Could not register the required data ramdisk.");
         }
     }
 

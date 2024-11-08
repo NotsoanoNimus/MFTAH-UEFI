@@ -70,14 +70,18 @@ struct {
     EFI_RAM_DISK_UNREGISTER_RAMDISK         Unregister;
 } EFI_RAM_DISK_PROTOCOL;
 
+// TODO! Spread this compliant packing method to other places where it's required.
+// Clang clearly isn't packing what it should be according to the directive without the pragma.
+#pragma pack(push, 1)
 typedef
-struct {
+struct __attribute__((packed)) {
     EFI_DEVICE_PATH_PROTOCOL    Header;
     UINT32                      StartingAddr[2];
     UINT32                      EndingAddr[2];
     EFI_GUID                    TypeGuid;
     UINT16                      Instance;
-} __attribute__((packed)) MEDIA_RAMDISK_DEVICE_PATH;
+} MEDIA_RAMDISK_DEVICE_PATH;
+#pragma pack(pop)
 
 typedef
 struct {

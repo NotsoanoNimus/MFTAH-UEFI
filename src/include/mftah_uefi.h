@@ -132,7 +132,7 @@
     EFI_DANGER(x, ##__VA_ARGS__); PRINTLN("\r\n");
 
 
-#if EFI_DEBUG==0
+#if EFI_DEBUG==1
 /* Debug-only. Prints debugging information when enabled by compiler flag. */
 #   define DPRINT(x, ...) \
         EFI_COLOR(MFTAH_COLOR_DEBUG); \

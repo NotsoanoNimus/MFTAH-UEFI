@@ -117,8 +117,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
     FreePool(TargetPath);
 
-    MEMDUMP(Context->LoadedImageDevicePath, 128); BS->Stall(60000000);
-
     /* Ramdisks are a bit different: the sub-type loader is now called on the loaded image.
      * Even though the LoadedImage properties are changed on the chain from the loader context,
      * the original ramdisk remains a loaded piece of reserved memory for the chainloaded OS to

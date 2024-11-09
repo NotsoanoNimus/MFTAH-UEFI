@@ -4,12 +4,6 @@
 #include "../mftah_uefi.h"
 
 
-#define MAX(x,y) \
-    (((x) >= (y)) ? (x) : (y))
-#define MIN(x,y) \
-    (((x) <= (y)) ? (x) : (y))
-
-
 
 /**
  * Get the size of the file from the given handle.

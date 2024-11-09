@@ -5,31 +5,17 @@
 // #include "../core/compression.h"
 
 #include "../drivers/config.h"
-#include "../drivers/displays/menu_structs.h"
 
-
-
-typedef
-mftah_fp__progress_hook_t
-HOOK_PROGRESS;
-
-typedef
-VOID
-(EFIAPI *HOOK_STALL)(
-    IN UINTN TimeInMilliseconds
-);
 
 
 typedef
 struct {
     CONFIG_CHAIN_BLOCK      *Chain;
-    HOOK_PROGRESS           ProgressFunc;
-    HOOK_STALL              StallFunc;
     EFI_PHYSICAL_ADDRESS    LoadedImageBase;
     UINTN                   LoadedImageSize;
     EFI_DEVICE_PATH         *LoadedImageDevicePath;
     mftah_payload_t         *MftahPayloadWrapper;
-} __attribute__((packed)) LOADER_CONTEXT;
+} LOADER_CONTEXT;
 
 
 
@@ -38,30 +24,14 @@ typedef
 struct {
     VOID    (*Load)(LOADER_CONTEXT *Context);
     VOID    *ExtraInfo;
-} __attribute__((packed)) EFI_EXECUTABLE_LOADER;
-
-
-
-VOID
-LoaderDestroyContext(
-    IN LOADER_CONTEXT *Context
-);
-
-
-EFI_STATUS
-LoaderValidateChain(
-    IN CONFIGURATION    *c,
-    IN MENU_STATE       *m,
-    OUT CHAR8           *ErrorMsg
-);
+} EFI_EXECUTABLE_LOADER;
 
 
 VOID
-LoaderEnterChain(
-    IN CONFIGURATION                *c,
-    IN MENU_STATE                   *m,
-    IN EFI_MENU_RENDERER_PROTOCOL   *MENU
-);
+LoaderDestroyContext(IN LOADER_CONTEXT *Context);
+
+VOID
+LoaderEnterChain(IN UINTN SelectedItemIndex);
 
 
 

@@ -4,4 +4,4 @@
 #include "ramdisk.h"
 #include "threading.h"
 #include "mftah_adapter.h"
-#include "displays/menu.h"
+#include "displays.h"

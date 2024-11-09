@@ -30,6 +30,7 @@ STATIC BOOLEAN IsReadingBanner = FALSE;
 
 /* Configuration block structure. */
 STATIC CONFIGURATION Configuration = {0};
+CONFIGURATION *CONFIG = NULL;
 
 /* Tuple structure to hold a color name (lowercase) corresponding
     to EFI color IDs and UINT64s representing graphical colors. */
@@ -324,6 +325,9 @@ ParseColor__Store:
 
             break;
 
+        case NONE:
+            break;
+
         default:
             ErrorMsg = L"Unknown `display` mode setting";
             return EFI_LOAD_ERROR;
@@ -395,11 +399,6 @@ SeekElementStart:
     Element[MAX_ELEMENT_LENGTH] = '\0';
     Definition[MAX_DEFINITION_LENGTH] = '\0';
 
-    // EFI_COLOR(MFTAH_COLOR_DEBUG);
-    // PRINT("Parsing configuration element `%a`  [[[%a]]]", Element, Definition);
-    // EFI_COLOR(MFTAH_COLOR_DEFAULT);
-    // PRINT("\r\n");
-
     if (0 == Element[0] || 0 == Definition[0]) {
         ErrorMsg = L"Missing element name or definition";
         return EFI_INVALID_PARAMETER;
@@ -444,6 +443,10 @@ ConfigInit(VOID)
     Configuration.Timeout           = 5 * 1000;
     Configuration.MaxTimeout        = 300 * 1000;
 
+    /* fk ur 'const' qualifiers >:] */
+    CONFIGURATION *ConfigAddress = &Configuration;
+    CopyMem(&CONFIG, &ConfigAddress, sizeof(CONFIGURATION *));
+
     /* Color defaults are initialized when the Mode is parsed from the configuration. */
     return EFI_SUCCESS;
 }
@@ -461,6 +464,9 @@ ConfigDestroy(VOID)
         Configuration.Chains[i] = NULL;
     }
 
+    /* Nullify the primary CONFIG pointer. */
+    SetMem(&CONFIG, sizeof(CONFIGURATION *), 0x00);
+
     return EFI_SUCCESS;
 }
 
@@ -472,19 +478,24 @@ ConfigDestroyChain(CONFIG_CHAIN_BLOCK *c)
     FreePool(c->PayloadPath);
     FreePool(c->TargetPath);
 
+    if (NULL != c->MFTAHKey) {
+        SecureWipe(c->MFTAHKey, AsciiStrLen(c->MFTAHKey));
+        FreePool(c->MFTAHKey);
+    }
+
+    for (UINTN i = 0; i < c->DataRamdisksLength; ++i) {
+        FreePool(c->DataRamdisks[i]->Path);
+
+        if (NULL != c->DataRamdisks[i]->MFTAHKey) {
+            SecureWipe(c->DataRamdisks[i]->MFTAHKey, AsciiStrLen(c->DataRamdisks[i]->MFTAHKey));
+            FreePool(c->DataRamdisks[i]->MFTAHKey);
+        }
+
+        FreePool(c->DataRamdisks[i]);
+        c->DataRamdisks[i] = NULL;
+    }
+
     FreePool(c);
-}
-
-
-CONFIGURATION *
-ConfigGet(VOID)
-{
-    CONFIGURATION *copy = (CONFIGURATION *)AllocateZeroPool(sizeof(CONFIGURATION));
-
-    if (NULL == copy) return NULL;
-    
-    CopyMem(copy, &Configuration, sizeof(CONFIGURATION));
-    return copy;
 }
 
 
@@ -508,21 +519,16 @@ ConfigDump(VOID)
     PRINTLN("Chains(%u):", Configuration.ChainsLength);
     PRINTLN("---");
     for (UINTN i = 0; i < Configuration.ChainsLength; ++i) {
-        // PRINTLN("   name(%a), payload(%a)",
-        //     Configuration.Chains[i]->Name ? Configuration.Chains[i]->Name : "NULL",
-        //     Configuration.Chains[i]->PayloadPath ? Configuration.Chains[i]->PayloadPath : "NULL");
-        // PRINTLN("   target(%a), type(%u), mftah(%u), compressed(%u)",
-        //     Configuration.Chains[i]->TargetPath ? Configuration.Chains[i]->TargetPath : "NULL",
-        //     Configuration.Chains[i]->Type,
-        //     !!(Configuration.Chains[i]->IsMFTAH));
-        // PRINTLN("   default(%u), immediate(%u)",
-        //     !!(Configuration.Chains[i]->IsDefault),
-        //     !!(Configuration.Chains[i]->IsImmediate));
         CHAR8 *Result = NULL;
         CHAR16 *ResultConv = NULL;
+
         ConfigDumpChain(Configuration.Chains[i], &Result);
+
         ResultConv = AsciiStrToUnicode(Result);
         VARPRINT(ResultConv);
+
+        FreePool(Result);
+        FreePool(ResultConv);
         PRINTLN("---");
     }
 

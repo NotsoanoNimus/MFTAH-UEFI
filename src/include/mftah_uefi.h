@@ -31,6 +31,13 @@
 #define c8          (CHAR8)
 #define c8p         (CHAR8 *)
 
+
+#define MAX(x,y) \
+    (((x) >= (y)) ? (x) : (y))
+#define MIN(x,y) \
+    (((x) <= (y)) ? (x) : (y))
+
+
 /* Various IDs for ACPI entries inserted at runtime. */
 #define MFTAH_CREATOR_ID    { 'X', 'M', 'I', 'T' }   /* Creator: 'XMIT' */
 #define MFTAH_OEM_TABLE_ID  { 'M', 'F', 'T', 'A', 'H', 'N', 'V', 'D' }

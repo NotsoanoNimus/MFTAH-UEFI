@@ -5,38 +5,14 @@
 #include "../include/loaders/elf.h"
 #include "../include/loaders/bin.h"
 
-#include "../include/drivers/displays/graphics.h"
-#include "../include/drivers/displays/text.h"
-#include "../include/drivers/displays/fb.h"
+#include "../include/drivers/displays.h"
 #include "../include/drivers/mftah_adapter.h"
 #include "../include/drivers/ramdisk.h"
 
 #include "../include/core/input.h"
-
-#include "../include/mftah_uefi.h"
 #include "../include/core/util.h"
 
-
-
-/* Gonna be a yikes from me. */
-// TODO: Convert this shit into a function, idc what it takes it's code BLOAT and it's confusing.
-#define LOADER_PANIC(Message) \
-{ \
-    ErrorMsg = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * 256); \
-    if (DisplayMode & GRAPHICAL && NULL != ErrorMsg) { \
-        AsciiSPrint(ErrorMsg, 256-1, Message " Exit Code: %u", Status); \
-        GPrint(ErrorMsg, FB->BLT, 20, 20, 0xFFFF0000, 0, TRUE, 2); \
-        FB->Flush(FB); \
-        FreePool(ErrorMsg); \
-        uefi_call_wrapper(BS->Stall, 1, 10000000); \
-        Shutdown(Status); \
-    } \
-    FreePool(ErrorMsg); \
-    EFI_COLOR(MFTAH_COLOR_PANIC); \
-    PRINT(Message); \
-    uefi_call_wrapper(BS->Stall, 1, 10000000); \
-    Shutdown(Status); \
-}
+#include "../include/mftah_uefi.h"
 
 
 
@@ -44,202 +20,23 @@ typedef
 struct {
     CHAIN_TYPE              Type;
     EFI_EXECUTABLE_LOADER   *FormatHandle;
-} __attribute__((packed)) LOADER_PAIR;
+} LOADER_PAIR;
 
-
-STATIC BOUNDED_SHAPE *LoadingIconUnderlayBlt,
-                     *ProgressBlt,
-                     *MftahKeyPromptBlt;
-
-STATIC COLOR_PAIR ProgressBarColors = {0},
-                  TextColors = {0};
-
-STATIC BOOLEAN IsQuick = FALSE;
 
 STATIC CONST CHAR8 *ProgressStatusMessage = NULL,
                    *InputErrorMessage = NULL;
 
 
 
+/* NOTE: This needs to maintain this function signature to comply
+    with the explicit MFTAH progress hook type. */
 STATIC
-EFIAPI
 VOID
-DrawMftahKeyPrompt__GraphicsMode(UINTN PassLength)
+ProgressWrapper(IN CONST UINTN *Current,
+                IN CONST UINTN *OutOfTotal,
+                IN VOID *Extra)
 {
-    CHAR8 *EnterPasswordMessage = "Enter Password:";
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
-
-    BltPixelFromARGB(&p, TextColors.Background);
-    FB->ClearBlt(FB, MftahKeyPromptBlt, &p);
-
-    FB_VERTEX PromptRect = {
-            .X = MftahKeyPromptBlt->Dimensions.Width / 8,
-            .Y = MftahKeyPromptBlt->Dimensions.Height - 30 - (2 * FB->BaseGlyphSize.Height)
-    };
-    FB_VERTEX PromptRectTo = {
-            .X = 7 * (MftahKeyPromptBlt->Dimensions.Width / 8),
-            .Y = MftahKeyPromptBlt->Dimensions.Height - 30
-    };
-
-    GPrint(EnterPasswordMessage,
-           MftahKeyPromptBlt,
-           (MftahKeyPromptBlt->Dimensions.Width / 2)
-               - ((AsciiStrLen(EnterPasswordMessage) * 2 * FB->BaseGlyphSize.Width) / 2),
-           20,
-           TextColors.Foreground,
-           TextColors.Background,
-           FALSE,
-           2);
-
-    if (NULL != InputErrorMessage) {
-        GPrint(InputErrorMessage,
-               MftahKeyPromptBlt,
-               (MftahKeyPromptBlt->Dimensions.Width / 2)
-                   - ((AsciiStrLen(InputErrorMessage) * 1 * FB->BaseGlyphSize.Width) / 2),
-               20 + (2 * FB->BaseGlyphSize.Height) + 30,
-               0xFFFF0000,
-               TextColors.Background,
-               FALSE,
-               1);
-    }
-
-    /* Input bar background and border. */
-    FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, PromptRect, PromptRectTo, 0, TRUE, 1, ProgressBarColors.Background);
-    FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, PromptRect, PromptRectTo, 0, FALSE, 1, 0x00000000);
-
-    /* Full BLT box border. */
-    FB_VERTEX Origin = {0};
-    FB_VERTEX FullBltEnd = { .X = MftahKeyPromptBlt->Dimensions.Width, .Y = MftahKeyPromptBlt->Dimensions.Height };
-    FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, Origin, FullBltEnd, 0, FALSE, 1, TextColors.Foreground);
-
-    /* Never exceed the width of the box when GPrint'ing. */
-    UINTN StarsToPrintInBox = MIN(
-        PassLength,
-        ((PromptRectTo.X - PromptRect.X) / (2 * FB->BaseGlyphSize.Width))
-    );
-
-    /* Print the '*' characters to match the current length of the password or the max width. */
-    for (UINTN i = 0; i < StarsToPrintInBox; ++i) {
-        GPrint("*",
-               MftahKeyPromptBlt,
-               PromptRect.X + 5 + (i * 2 * FB->BaseGlyphSize.Width),
-               PromptRect.Y,
-               ProgressBarColors.Foreground,
-               ProgressBarColors.Background,
-               FALSE,
-               2);
-    }
-
-    /* Finally, render it all. */
-    FB->RenderComponent(FB, MftahKeyPromptBlt, TRUE);
-}
-
-
-STATIC
-EFIAPI
-VOID
-DrawMftahKeyPrompt__TextMode(LOADER_CONTEXT *Context,
-                             UINTN PassLength)
-{
-}
-
-
-STATIC
-VOID
-FlipToFalse(EFI_EVENT Event,
-            VOID *Context)
-{ BOOLEAN *b = (BOOLEAN *)Context; if (NULL != b) *b = FALSE; }
-
-STATIC
-EFIAPI
-VOID
-Stall_GraphicalMode(UINTN TimeInMilliseconds)
-{
-    VOLATILE BOOLEAN Stall = TRUE;
-    EFI_EVENT StallEvent = {0};
-
-    if (TRUE == IsQuick) return;
-
-    uefi_call_wrapper(BS->CreateEvent, 5, (EVT_TIMER | EVT_NOTIFY_SIGNAL), TPL_NOTIFY, FlipToFalse, (VOID *)&Stall, &StallEvent);
-    uefi_call_wrapper(BS->SetTimer, 3, StallEvent, TimerPeriodic, 10 * 1000 * TimeInMilliseconds);
-
-    if (EFI_ERROR(LoadingAnimationLoop(LoadingIconUnderlayBlt, 0xFFFFFFFF, &Stall))) {
-        /* Stall normally if the animation can't be rendered. */
-        uefi_call_wrapper(BS->Stall, 1, TimeInMilliseconds * 1000);
-    }
-
-    uefi_call_wrapper(BS->CloseEvent, 1, StallEvent);
-}
-
-
-STATIC
-EFIAPI
-VOID
-Stall_TextMode(UINTN TimeInMilliseconds)
-{
-    // TODO: Is it possible to make an entropy-based text animation?
-    if (TRUE == IsQuick) return;
-
-    uefi_call_wrapper(BS->Stall, 1, TimeInMilliseconds * 1000);
-}
-
-
-STATIC
-VOID
-Progress_TextMode(IN CONST UINTN *Current,
-                  IN CONST UINTN *OutOfTotal,
-                  IN VOID *Extra)
-{
-}
-
-
-STATIC
-VOID
-Progress_GraphicalMode(IN CONST UINTN *Current,
-                       IN CONST UINTN *OutOfTotal,
-                       IN VOID *Extra)
-{
-    if (NULL == Current || NULL == OutOfTotal) return;
-
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
-    BltPixelFromARGB(&p, TextColors.Background);
-    FB->ClearBlt(FB, ProgressBlt, &p);
-
-    FB_VERTEX ProgressRect = {
-        .X = ProgressBlt->Dimensions.Width / 8,
-        .Y = ProgressBlt->Dimensions.Height - 60
-    };
-    FB_VERTEX ProgressRectTo = {
-        .X = 7 * (ProgressBlt->Dimensions.Width / 8),
-        .Y = ProgressBlt->Dimensions.Height - 10
-    };
-    FB_VERTEX ProgressRectForegroundTo = {
-        .X = ProgressRect.X + ((*Current * (ProgressRectTo.X - ProgressRect.X)) / *OutOfTotal),
-        .Y = ProgressRectTo.Y
-    };
-
-    if (NULL != ProgressStatusMessage) {
-        GPrint(ProgressStatusMessage,
-               ProgressBlt,
-               (ProgressBlt->Dimensions.Width / 2) - ((AsciiStrLen(ProgressStatusMessage) * 2 * FB->BaseGlyphSize.Width) / 2),
-               30,
-               TextColors.Foreground,
-               TextColors.Background,
-               FALSE,
-               2);
-    }
-
-    /* Progress bar background, foreground, then box border. */
-    FB->DrawSimpleShape(FB, ProgressBlt, FbShapeRectangle, ProgressRect, ProgressRectTo, 0, TRUE, 1, ProgressBarColors.Background);
-    FB->DrawSimpleShape(FB, ProgressBlt, FbShapeRectangle, ProgressRect, ProgressRectForegroundTo, 0, TRUE, 1, ProgressBarColors.Foreground);
-    FB->DrawSimpleShape(FB, ProgressBlt, FbShapeRectangle, ProgressRect, ProgressRectTo, 0, FALSE, 1, 0x00000000);
-
-    /* Full progress BLT box border. */
-    FB_VERTEX Origin = {0};
-    FB_VERTEX FullBltEnd = { .X = ProgressBlt->Dimensions.Width, .Y = ProgressBlt->Dimensions.Height };
-    FB->DrawSimpleShape(FB, ProgressBlt, FbShapeRectangle, Origin, FullBltEnd, 0, FALSE, 1, TextColors.Foreground);
-
-    FB->RenderComponent(FB, ProgressBlt, TRUE);
+    DISPLAY->Progress(DISPLAY, ProgressStatusMessage, *Current, *OutOfTotal);
 }
 
 
@@ -256,8 +53,8 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
     ProgressStatusMessage = "Locating File...";
 
     /* Render the initial progress details and the stall art */
-    Context->ProgressFunc(&at, &total, NULL);
-    Context->StallFunc(500);
+    DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+    if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
     if (NULL == Context->Chain->PayloadPath || '\0' == *(Context->Chain->PayloadPath)) {
         return EFI_LOAD_ERROR;   /* bad/null filename */
@@ -286,8 +83,8 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
         CHAR16 *VolumeName = AsciiStrToUnicode(Context->Chain->PayloadPath);
 
         ProgressStatusMessage = "Opening Volume...";
-        at = 50; Context->ProgressFunc(&at, &total, NULL);
-        Context->StallFunc(500);
+        at = 50; DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+        if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
         Status = GetFileSystemHandleByVolumeName(VolumeName, &TargetHandle);
         FreePool(VolumeName);
@@ -301,8 +98,8 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
 
     /* Do stuff with slight stalls between progress messages. */
     ProgressStatusMessage = "Reading Payload...";
-    at = 0; Context->ProgressFunc(&at, &total, NULL);
-    Context->StallFunc(500);
+    at = 0; DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+    if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
     /* NOTE: Use the 's' starting point here because it's always set to the full file path. */
     CHAR16 *PayloadPath = AsciiStrToUnicode(s);
@@ -321,14 +118,14 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
                       EfiReservedMemoryType,   /* always mark payload as reserved in e820/memmap */
                       RAM_DISK_BLOCK_SIZE,
                       (Context->Chain->IsMFTAH ? sizeof(mftah_payload_header_t) : 0),
-                      Context->ProgressFunc));
+                      ProgressWrapper));
     FreePool(PayloadPath);
 
     /* Close out with a completed progress detail and a small stall. */
     ProgressStatusMessage = "Success!";
     at = total;
-    Context->ProgressFunc(&at, &total, NULL);
-    Context->StallFunc(1500);
+    DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+    if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 1500);
 
     return EFI_SUCCESS;
 }
@@ -339,16 +136,12 @@ STATIC
 EFIAPI
 EFI_STATUS
 LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
-                      IN LOADER_CONTEXT *Context)//,
-                    //   OUT VOID **LoadedRamdiskBase,
-                    //   OUT UINTN *LoadedRamdiskSize)
+                      IN LOADER_CONTEXT *Context)
 {
     if (
         NULL == Ramdisk
         || NULL == Ramdisk->Path
         || 0 == AsciiStrLen(Ramdisk->Path)
-        // || NULL == LoadedRamdiskBase
-        // || NULL == LoadedRamdiskSize
     ) return EFI_INVALID_PARAMETER;
 
     EFI_STATUS Status = EFI_SUCCESS;
@@ -358,8 +151,8 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
     EFI_DEVICE_PATH_PROTOCOL *RamdiskDevicePath = NULL;
 
     ProgressStatusMessage = "Locating Ramdisk...";
-    Context->ProgressFunc(&at, &total, NULL);
-    Context->StallFunc(500);
+    DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+    if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
     EFI_HANDLE TargetHandle = ENTRY_HANDLE;
 
@@ -383,8 +176,8 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
         CHAR16 *VolumeName = AsciiStrToUnicode(Ramdisk->Path);
 
         ProgressStatusMessage = "Opening Volume...";
-        at = 50; Context->ProgressFunc(&at, &total, NULL);
-        Context->StallFunc(500);
+        at = 50; DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+        if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
         Status = GetFileSystemHandleByVolumeName(VolumeName, &TargetHandle);
         FreePool(VolumeName);
@@ -394,8 +187,8 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
 
     /* Do stuff with slight stalls between progress messages. */
     ProgressStatusMessage = "Reading Ramdisk...";
-    at = 0; Context->ProgressFunc(&at, &total, NULL);
-    Context->StallFunc(500);
+    at = 0; DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+    if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
     /* NOTE: Use the 's' starting point here because it's always set to the full file path. */
     CHAR16 *PayloadPath = AsciiStrToUnicode(s);
@@ -414,7 +207,7 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
                       EfiReservedMemoryType,   /* always mark payload as reserved in e820/memmap */
                       RAM_DISK_BLOCK_SIZE,
                       (Ramdisk->IsMFTAH ? sizeof(mftah_payload_header_t) : 0),
-                      Context->ProgressFunc));
+                      ProgressWrapper));
     FreePool(PayloadPath);
 
     // TODO: MFTAH decrypt & decompression -- these types of decorators need to be moved to a more generic function/place
@@ -429,8 +222,8 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
     /* Close out with a completed progress detail and a small stall. */
     ProgressStatusMessage = "Loaded!";
     at = total;
-    Context->ProgressFunc(&at, &total, NULL);
-    Context->StallFunc(1500);
+    DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
+    if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 1500);
 
     return EFI_SUCCESS;
 }
@@ -495,15 +288,13 @@ GetPassword__Repeat:
     do {
         PassLength = (p - Password);
 
-        DrawMftahKeyPrompt__GraphicsMode(PassLength);
+        DISPLAY->InputPopup(DISPLAY, Password, TRUE, InputErrorMessage);
         InputErrorMessage = NULL;
 
         SetMem(&Key, sizeof(EFI_KEY_DATA), 0x00);
 
         if (EFI_ERROR(ReadKey(&Key, 0))) {
-            // TODO: Fix error handling mess.
-            GPrint("Unknown keyboard input failure.", MftahKeyPromptBlt, 20, 20, 0xFFFF0000, 0, FALSE, 2);
-            FB->RenderComponent(FB, MftahKeyPromptBlt, TRUE);
+            DISPLAY->Panic(DISPLAY, "Unknown keyboard input failure.", TRUE, 10000000);
             HALT;
         }
 
@@ -559,7 +350,7 @@ GetPassword__EnterKey:
                 InputErrorMessage = "Invalid password. Try again.";
                 break;
             default:
-                InputErrorMessage = "Yikes! Invalid protocol parameters.";
+                InputErrorMessage = "Invalid protocol parameters.";
                 break;
         }
 
@@ -628,7 +419,6 @@ LoaderDecompress(IN LOADER_CONTEXT *Context)
 }
 
 
-
 VOID
 LoaderDestroyContext(IN LOADER_CONTEXT *Context)
 {
@@ -638,63 +428,36 @@ LoaderDestroyContext(IN LOADER_CONTEXT *Context)
     FreePool(Context->MftahPayloadWrapper);
     FreePool(Context);
 
-    BltDestroy(ProgressBlt);
-    BltDestroy(LoadingIconUnderlayBlt);
-    BltDestroy(MftahKeyPromptBlt);
-
-    /* Black out the screen one last time. */
-    FB->ClearScreen(FB, 0); FB->Flush(FB);
-
-    FramebufferDestroy();
+    /* Destroy the MFTAH loader protocol instance. */
     MftahDestroy();
-}
 
+    /* Deinit the config object. We don't need it anymore. */
+    ConfigDestroy();
 
-EFI_STATUS
-LoaderValidateChain(IN CONFIGURATION *c,
-                    IN MENU_STATE *m,
-                    OUT CHAR8 *ErrorMsg)
-{
-    if (
-        NULL == c
-        || NULL == m
-        || NULL == ErrorMsg
-    ) return EFI_INVALID_PARAMETER;
+    /* Black out the screen one last time, then destroy the display driver. */
+    DISPLAY->ClearScreen(DISPLAY, 0);
 
-    // TODO!
-    /* Check to ensure chain properties qualify for loading before actually doing it. */
-
-    return EFI_SUCCESS;
+    DISPLAY->Destroy(DISPLAY);
+    FreePool(DISPLAY);
+    DISPLAY = NULL;
 }
 
 
 VOID
-LoaderEnterChain(IN CONFIGURATION *c,
-                 IN MENU_STATE *m,
-                 IN EFI_MENU_RENDERER_PROTOCOL *MENU)
+LoaderEnterChain(IN UINTN SelectedChainIndex)
 {
     /* Basically just free up resources and switch to the right type.
         Through this method, we're effectively just switching back to a simple text mode. */
     EFI_STATUS Status = EFI_SUCCESS;
-    CHAR8 *ErrorMsg = NULL;
-    DISPLAY_MODE DisplayMode = c->Mode;
-
-    /* Clear the screen immediately. */
-    MENU->ClearScreen(0);
-
-    /* Just steal some colors from the palette. */
-    ProgressBarColors = c->Colors.Title;
-    TextColors = c->Colors.Text;
-    IsQuick = c->Quick;
 
     CONFIG_CHAIN_BLOCK *chain = (CONFIG_CHAIN_BLOCK *)AllocateZeroPool(sizeof(CONFIG_CHAIN_BLOCK));
     if (NULL == chain) {
         Status = EFI_OUT_OF_RESOURCES;
-        LOADER_PANIC("Failed to duplicate the loaded chain: out of resources!");
+        DISPLAY->Panic(DISPLAY, "Failed to duplicate the loaded chain: out of resources!", TRUE, 10000000);
     }
 
     /* A DEEP clone is required, since all pointers will be freed. */
-    CopyMem(chain, c->Chains[m->CurrentItemIndex], sizeof(CONFIG_CHAIN_BLOCK));
+    CopyMem(chain, CONFIG->Chains[SelectedChainIndex], sizeof(CONFIG_CHAIN_BLOCK));
 
     CHAR8 *Name = (CHAR8 *)AllocateZeroPool(AsciiStrLen(chain->Name) + 1);
     CopyMem(Name, chain->Name, AsciiStrLen(chain->Name));
@@ -708,93 +471,22 @@ LoaderEnterChain(IN CONFIGURATION *c,
     CopyMem(PayloadPath, chain->PayloadPath, AsciiStrLen(chain->PayloadPath));
     chain->PayloadPath = PayloadPath;
 
-    HOOK_PROGRESS ProgressFunc = NULL;
-    HOOK_STALL StallFunc = NULL;
-
-    switch (c->Mode) {
-        case GRAPHICAL:
-            /* GUI progress indication requires a bit more initialization. */
-            ProgressFunc = Progress_GraphicalMode;
-            StallFunc = Stall_GraphicalMode;
-
-            EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
-            BltPixelFromARGB(&p, TextColors.Background);
-
-            Status = NewObjectBlt((FB->Resolution.Width / 2) - MIN(250, (FB->Resolution.Width / 4)),
-                                  (FB->Resolution.Height / 5),
-                                  MIN(500, (FB->Resolution.Width / 2)),
-                                  MIN(250, (FB->Resolution.Height / 3)),
-                                  1,
-                                  &ProgressBlt);
-            if (EFI_ERROR(Status)) {
-                LOADER_PANIC("Failed to allocate a BLT for the progress notifier.");
-            }
-            FB->ClearBlt(FB, ProgressBlt, &p);
-
-            Status = NewObjectBlt(ProgressBlt->Position.X,
-                                  ProgressBlt->Position.Y,
-                                  ProgressBlt->Dimensions.Width,
-                                  ProgressBlt->Dimensions.Height,
-                                  1,
-                                  &MftahKeyPromptBlt);
-            if (EFI_ERROR(Status)) {
-                LOADER_PANIC("Failed to allocate a BLT for the MFTAH key prompt.");
-            }
-            FB->ClearBlt(FB, MftahKeyPromptBlt, &p);
-
-            Status = NewObjectBlt((FB->Resolution.Width / 2) - 100,
-                                  ProgressBlt->Position.Y + ProgressBlt->Dimensions.Height + 30,
-                                  200,
-                                  200,
-                                  2,
-                                  &LoadingIconUnderlayBlt);
-            if (EFI_ERROR(Status)) {
-                LOADER_PANIC("Failed to allocate the loading animation underlay BLT.");
-            }
-
-            SetMem(&p, sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL), 0);
-            FB->ClearBlt(FB, LoadingIconUnderlayBlt, &p);
-
-            break;
-
-        case TEXT:
-            ProgressFunc = Progress_TextMode;
-            StallFunc = Stall_TextMode;
-            break;
-    }
-
-    /* Based on the mode, deinit everything. Yea I know I could have put it with
-        the above stuff. I like to keep it separate in case it needs relocating. */
-    switch (c->Mode) {
-        case GRAPHICAL:
-            GraphicsDestroy(TRUE);
-            break;
-        case TEXT:
-            TextModeDestroy();
-            break;
-    }
-
-    /* Deinit the config objects. */
-    ConfigDestroy();
-
-    /* Destroy menu and menu renderer objects. */
-    FreePool(m);
-    FreePool(MENU);
-
     /* Set up the context object and send it to the right chain. */
     LOADER_CONTEXT *Context = (LOADER_CONTEXT *)AllocateZeroPool(sizeof(LOADER_CONTEXT));
     if (NULL == Context) {
         Status = EFI_OUT_OF_RESOURCES;
-        LOADER_PANIC("Failed to allocate loader context: out of resources!");
+        DISPLAY->Panic(DISPLAY, "Failed to allocate loader context: out of resources!", TRUE, 10000000);
     }
 
+    /* Preserve the pointer to the chain in the context. */
     Context->Chain = chain;
-    Context->ProgressFunc = ProgressFunc;
-    Context->StallFunc = StallFunc;
+
+    /* Clear the screen. */
+    DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
 
     /* Read the payload file from block storage. */
     if (EFI_ERROR((Status = LoaderReadImage(Context)))) {
-        LOADER_PANIC("Failed to read the target payload into memory.");
+        DISPLAY->Panic(DISPLAY, "Failed to read the target payload into memory.", TRUE, 10000000);
     }
 
     /* Check the chain's properties. This occurs in a certain order. For example,
@@ -802,61 +494,49 @@ LoaderEnterChain(IN CONFIGURATION *c,
         compressing AES-256 data is rather useless. */
     if (TRUE == chain->IsMFTAH) {
         /* Clear the screen. */
-        FB->ClearScreen(FB, 0); FB->Flush(FB);
+        DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+        InputErrorMessage = NULL;
 
         /* Prompt for a password if necessary. This also creates the MFTAH
             payload wrapper object. */
         if (EFI_ERROR((Status = LoaderGetAndValidateMftahKey(Context)))) {
-            LOADER_PANIC("Fatal exception while capturing MFTAH key.");
+            DISPLAY->Panic(DISPLAY, "Fatal exception while capturing MFTAH key.", TRUE, 10000000);
         }
 
         /* Clear the screen. */
-        FB->ClearScreen(FB, 0); FB->Flush(FB);
+        DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
         ProgressStatusMessage = "Decrypting...";
 
         if (EFI_ERROR((Status = LoaderMftahDecrypt(Context)))) {
-            LOADER_PANIC("MFTAH decryption encountered a fatal exception.");
+            DISPLAY->Panic(DISPLAY, "MFTAH decryption encountered a fatal exception.", TRUE, 10000000);
         }
     }
 
     if (TRUE == chain->IsCompressed) {
         // TODO: Compression compatibility.
         /* Clear the screen. */
-        FB->ClearScreen(FB, 0); FB->Flush(FB);
+        DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+        ProgressStatusMessage = "Decompressing...";
+
         if (EFI_ERROR((Status = LoaderDecompress(Context)))) {
-            LOADER_PANIC("Decompression returned an irrecoverable failure code.");
+            DISPLAY->Panic(DISPLAY, "Decompression returned an irrecoverable failure code.", TRUE, 10000000);
         }
     }
 
+    DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+
     /* Load any data ramdisks that were specified in the chain.
         NOTE: Failure to load these is not fatal unless otherwise specified. */
-    /* Clear the screen. */
-    // TODO compat w/ both modes
-    FB->ClearScreen(FB, 0); FB->Flush(FB);
     for (UINTN i = 0; i < chain->DataRamdisksLength; ++i) {
         DATA_RAMDISK *r = chain->DataRamdisks[i];
 
         Status = LoaderReadDataRamdisk(r, Context);
         if (EFI_ERROR(Status) && TRUE == r->IsRequired) {
-            PANIC("Could not register the required data ramdisk.");
+            DISPLAY->Panic(DISPLAY, "Could not register the required data ramdisk.", TRUE, 10000000);
         }
     }
 
-    /* Clear the screen. */
-    // TODO Compatibility with both modes please.
-    FB->ClearScreen(FB, 0);
-    ProgressStatusMessage = "Chainloading...";
-    GPrint(ProgressStatusMessage,
-           FB->BLT,
-           (FB->Resolution.Width / 2)
-               - (((AsciiStrLen(ProgressStatusMessage) * 3 * FB->BaseGlyphSize.Width)) / 2),
-           (FB->Resolution.Height / 2) - ((3 * FB->BaseGlyphSize.Height) / 2),
-           0xFFFFFFFF,
-           0x00000000,
-           FALSE,
-           3);
-    FB->Flush(FB);
-
+    /* Load the image based on the chain's type. */
     switch (chain->Type) {
         case DISK:  DiskLoader .Load(Context); break;
         case EXE:   ExeLoader  .Load(Context); break;
@@ -867,5 +547,5 @@ LoaderEnterChain(IN CONFIGURATION *c,
 
     /* End of the road. */
     Status = EFI_NOT_STARTED;
-    LOADER_PANIC("Could not transfer control to the right loader.");
+    DISPLAY->Panic(DISPLAY, "Could not transfer control to the right loader.", TRUE, 10000000);
 }

@@ -1,14 +1,122 @@
-#include "../../include/drivers/displays/graphics.h"
+#include "../../include/drivers/displays.h"
+#include "../../include/drivers/fb.h"
 
 #include "../../include/core/util.h"
-#include "../../include/loaders/loader.h"
+
+
+
+typedef
+enum {
+    OverlayHidden = 0,
+    OverlayPrompt,
+    OverlayInfo,
+    OverlayWarning,
+    OverlayMax
+} OVERLAY_STATE;
+
+typedef
+struct {
+    UINT8           Zoom;
+    BOOLEAN         CompressedView;
+    UINTN           LeftPanelHeight;
+    UINTN           RightPanelHeight;
+    FB_VERTEX       BannerPosition;
+    FB_VERTEX       TimeoutsPosition;
+    UINTN           NormalTimeout;
+    UINTN           MaxTimeout;
+    OVERLAY_STATE   OverlayState;
+    BOUNDED_SHAPE   *OverlayLayer;
+    BOUNDED_SHAPE   *TimeoutsLayer;
+    CHAR8           NormalTimeoutText[128];
+    CHAR8           MaxTimeoutText[128];
+} GRAPHICS_CONTEXT;
 
 
 
 STATIC EFI_GRAPHICS_OUTPUT_PROTOCOL *GOP = NULL;
+
 STATIC GRAPHICS_CONTEXT *GraphicsContext = NULL;
 
+STATIC BOUNDED_SHAPE *LoadingIconUnderlayBlt,
+                     *ProgressBlt,
+                     *MftahKeyPromptBlt;
 
+
+
+/* Forward declarations. */
+STATIC EFI_STATUS GraphicsInit(
+    IN SIMPLE_DISPLAY *This,
+    IN CONFIGURATION *Configuration
+);
+
+STATIC EFI_STATUS GraphicsDestroy(
+    IN CONST SIMPLE_DISPLAY *This
+);
+
+STATIC VOID GraphicsClearScreen(
+    IN CONST SIMPLE_DISPLAY *This,
+    IN UINT32 Color
+);
+
+STATIC VOID GraphicsPanic(
+    IN CONST SIMPLE_DISPLAY *This,
+    IN CHAR8 *Message,
+    IN BOOLEAN IsShutdown,
+    IN UINTN ShutdownTimer
+);
+
+STATIC VOID GraphicsPrintProgress(
+    IN CONST SIMPLE_DISPLAY *This,                      
+    IN CONST CHAR8 *Message,                      
+    IN UINTN Current,                      
+    IN UINTN OutOfTotal
+);
+
+STATIC VOID GraphicsStall(
+    IN CONST SIMPLE_DISPLAY *This,
+    IN UINTN TimeInMilliseconds
+);
+
+STATIC VOID GraphicsInputPopup(
+    IN CONST SIMPLE_DISPLAY *This,
+    IN CHAR8 *CurrentInput,
+    IN BOOLEAN IsHidden,
+    IN CHAR8 *ErrorMessage OPTIONAL
+);
+
+/* Construct the static display protocol instance. */
+SIMPLE_DISPLAY GUI = {
+    .Initialize     = GraphicsInit,
+    .Destroy        = GraphicsDestroy,
+    .ClearScreen    = GraphicsClearScreen,
+    .Panic          = GraphicsPanic,
+    .Progress       = GraphicsPrintProgress,
+    .Stall          = GraphicsStall,
+    .InputPopup     = GraphicsInputPopup,
+
+    .MENU           = NULL
+};
+
+
+STATIC VOID GPrint(
+    CHAR8 *Str,
+    BOUNDED_SHAPE *ObjectBltBuffer,
+    UINTN X,
+    UINTN Y,
+    UINT32 Foreground,
+    UINT32 Background,
+    BOOLEAN Wrap,
+    UINT8 FontScale
+);
+
+STATIC EFI_STATUS LoadingAnimationLoop(
+    BOUNDED_SHAPE *Underlay,
+    UINT32 ColorARGB,
+    VOLATILE BOOLEAN *Stall
+);
+
+
+/* LAYOUT CONSTANTS. */
 #define LAYOUT_G_MARGIN_LEFT                16
 #define LAYOUT_G_MARGIN_RIGHT               16
 #define LAYOUT_G_MARGIN_TOP                 16
@@ -47,11 +155,6 @@ STATIC GRAPHICS_CONTEXT *GraphicsContext = NULL;
 #define LAYOUT_G_OVERLAY_Y                  (MAX(FB->Resolution.Height / 4, 128))
 
 
-#define PANIC_GUI(Message) \
-    GPrint(Message, FB->BLT, 20, 20, 0xFFFF0000, 0, TRUE, 2); \
-    FB->Flush(FB);
-
-
 #define GRAPHICS_MAX_RENDERABLES 32
 STATIC BOUNDED_SHAPE *Renderables[GRAPHICS_MAX_RENDERABLES] = {0};
 STATIC UINTN RenderablesLength = 0;
@@ -59,8 +162,7 @@ STATIC UINTN RenderablesLength = 0;
 
 #define DECL_DRAW_FUNC(Name) \
     STATIC EFIAPI VOID \
-    GraphicsDraw__##Name( \
-        BOUNDED_SHAPE *This, CONFIGURATION *c, MENU_STATE *m, VOID *e)
+    GraphicsDraw__##Name(BOUNDED_SHAPE *This, CONFIGURATION *c, MENU_STATE *m, VOID *e)
 
 DECL_DRAW_FUNC(Underlay);
 DECL_DRAW_FUNC(LeftPanel);
@@ -72,84 +174,12 @@ DECL_DRAW_FUNC(MenuItem);
 
 
 STATIC
-EFIAPI
 VOID
-ClearScreen(IN UINT32 Color)
-{
-    FB->ClearScreen(FB, Color);
-    FB->Flush(FB);
-}
-
-
-STATIC
-EFIAPI
-CHAR8 *
-InputPopup(IN CHAR8 *Prompt,
-           IN UINTN MaxLength,
-           IN BOOLEAN IsHidden)
-{
-    // TODO
-    return NULL;
-}
-
-
-STATIC
-EFIAPI
-BOOLEAN
-Confirmation(IN CHAR8 *Prompt)
-{
-    // TODO
-    return FALSE;
-}
-
-
-STATIC
-EFIAPI
-VOID
-InnerPopup(IN CHAR8 *Message,
-           IN COLOR_PAIR Colors,
-           IN BOOLEAN WaitsForEnter)
-{
-    /* Display a notification. The TEXT mode can dynamically determine
-        where and how to place it based on the "resolution" of LCB. This
-        must pause for the ENTER key for the user to 'press OK'. */
-}
-
-
-STATIC
-EFIAPI
-VOID
-Popup(IN CHAR8 *Message)
-{
-    /* Proxy to inner method with a specific coloring. */
-    // TODO: create color settings for these??
-    COLOR_PAIR c = { .Background = 0xFF0033AA, .Foreground = 0xFFFFFFFF };
-
-    return InnerPopup(Message, c, TRUE);
-}
-
-
-STATIC
-EFIAPI
-VOID
-WarningPopup(IN CHAR8 *Message)
-{
-    /* Just proxy this to 'popup' with a different color. */
-    COLOR_PAIR c = { .Background = 0xFFDD0033, .Foreground = 0xFF00AAAA };
-
-    return InnerPopup(Message, c, TRUE);
-}
-
-
-STATIC
-EFIAPI
-VOID
-DrawMenu(IN CONFIGURATION *c,
-         IN MENU_STATE *m)
+DrawMenu(IN MENU_STATE *m)
 {
     FB_VERTEX Origin = {0};
 
-    FB->ClearScreen(FB, c->Colors.Background);
+    FB->ClearScreen(FB, CONFIG->Colors.Background);
 
     /* The Z-index value walks upwards from 0 to its max value (inclusive). */
     for (UINTN z = 0; z <= FB_Z_INDEX_MAX; ++z) {
@@ -168,16 +198,16 @@ DrawMenu(IN CONFIGURATION *c,
 
             /* Invoke the renderable's Draw method. */
             if (NULL != Renderables[i]->Draw) {
-                Renderables[i]->Draw(Renderables[i], c, m, (VOID *)&i);
+                Renderables[i]->Draw(Renderables[i], CONFIG, m, (VOID *)&i);
             }
 
             /* Draw the BLT buffer into the higher/main BLT buffer, row by row. */
             FB->BltToBlt(FB,
-                         FB->BLT,
-                         Renderables[i],
-                         Renderables[i]->Position,
-                         Origin,
-                         Renderables[i]->Dimensions);
+                             FB->BLT,
+                             Renderables[i],
+                             Renderables[i]->Position,
+                             Origin,
+                             Renderables[i]->Dimensions);
         }
     }
 
@@ -187,14 +217,9 @@ DrawMenu(IN CONFIGURATION *c,
 
 
 STATIC
-EFIAPI
 EFI_STATUS
-InitMenu(IN CONFIGURATION *c,
-         IN MENU_STATE *State)
+InitMenu(IN EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *FB)
 {
-    /* Initialize all primary menu shapes according to LCB dimensions. */
-    if (NULL == c || NULL == State) return EFI_INVALID_PARAMETER;
-
     EFI_STATUS Status = EFI_SUCCESS;
     RenderablesLength = 0;
 
@@ -321,13 +346,11 @@ InitMenu(IN CONFIGURATION *c,
 
 
 STATIC
-EFIAPI
 VOID
 TimerTick(EFI_EVENT Event,
           VOID *Context)
 {
-    MENU_STATE *m = (MENU_STATE *)(((TIMER_CTX *)Context)->m);
-    CONFIGURATION *c = (CONFIGURATION *)(((TIMER_CTX *)Context)->c);
+    MENU_STATE *m = (MENU_STATE *)Context;
 
     if (
         FALSE == m->KeyPressReceived
@@ -337,7 +360,7 @@ TimerTick(EFI_EVENT Event,
         /* A normal timeout has occurred. Signal to the menu handler. */
         uefi_call_wrapper(BS->CloseEvent, 1, Event);
 
-        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, c, m, NULL);
+        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, CONFIG, m, NULL);
         FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
         uefi_call_wrapper(BS->Stall, 1, 2000000);
 
@@ -354,7 +377,7 @@ TimerTick(EFI_EVENT Event,
         /* First, cancel the event. */
         uefi_call_wrapper(BS->CloseEvent, 1, Event);
 
-        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, c, m, NULL);
+        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, CONFIG, m, NULL);
         FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
         uefi_call_wrapper(BS->Stall, 1, 2000000);
 
@@ -391,7 +414,7 @@ TimerTick(EFI_EVENT Event,
         }
 
         /* Draw the base state of the timeouts panel. */
-        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, c, m, NULL);
+        GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, CONFIG, m, NULL);
         FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
     }
 
@@ -400,11 +423,12 @@ TimerTick(EFI_EVENT Event,
 }
 
 
-
+STATIC
 EFI_STATUS
-GraphicsInit(CONFIGURATION *c)
+GraphicsInit(IN SIMPLE_DISPLAY *This,
+             IN CONFIGURATION *Configuration)
 {
-    if (NULL == c) return EFI_INVALID_PARAMETER;
+    if (NULL == Configuration) return EFI_INVALID_PARAMETER;
 
     EFI_STATUS Status = EFI_SUCCESS;
 
@@ -418,7 +442,7 @@ GraphicsInit(CONFIGURATION *c)
                   (VOID **)&GOP);
 
     /* Skip video mode auto-selection when set by config. */
-    if (FALSE == c->AutoMode) goto GraphicsInit__SkipVideoMode;
+    if (FALSE == Configuration->AutoMode) goto GraphicsInit__SkipVideoMode;
 
 Init__QueryMode:
     Status = uefi_call_wrapper(GOP->QueryMode, 4,
@@ -489,48 +513,87 @@ GraphicsInit__SkipVideoMode:
     GraphicsContext = (GRAPHICS_CONTEXT *)AllocateZeroPool(sizeof(GRAPHICS_CONTEXT));
 
     /* No tricks here... */
-    GraphicsContext->Zoom = c->Scale;
-    GraphicsContext->NormalTimeout = c->Timeout;
-    GraphicsContext->MaxTimeout = c->MaxTimeout;
+    GraphicsContext->Zoom = Configuration->Scale;
+    GraphicsContext->NormalTimeout = Configuration->Timeout;
+    GraphicsContext->MaxTimeout = Configuration->MaxTimeout;
 
     /* Initialize the framebuffer object and clear the screen to the bg color. */
     ERRCHECK(FramebufferInit(GOP));
 
-    if (NULL == FB->BLT) {
+    if (NULL == FB || NULL == FB->BLT) {
         Status = EFI_OUT_OF_RESOURCES;
         PANIC("FATAL: GOP:  No BLT shadow buffer allocated: out of resources.");
     }
 
-    /* TESTING SPINNING LOADER ICON. */
-    // EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = {0};
-    // BOUNDED_SHAPE *blt = NULL; ERRCHECK(NewObjectBlt(0, 0, FB->Resolution.Width, FB->Resolution.Height, FB_Z_INDEX_MAX, &blt));
-    // CopyMem((VOID *)blt->Buffer, (VOID *)FB->BLT->Buffer, FB->BLT->BufferSize);
-    // VOLATILE BOOLEAN b = TRUE; FB_DIMENSION d = {150, 150}; f.X = 100; f.Y = 100;
-    // LoadingAnimationLoop(blt, f, d, &b);
-    // uefi_call_wrapper(BS->Stall, 1, 10000000);
+    /* Initial screen clearing. */
+    This->ClearScreen(This, Configuration->Colors.Background);
+
+    /* Ready the menu's objects. */
+    EFI_MENU_RENDERER_PROTOCOL *Renderer = (EFI_MENU_RENDERER_PROTOCOL *)
+        AllocateZeroPool(sizeof(EFI_MENU_RENDERER_PROTOCOL));
+    if (NULL == Renderer) {
+        PANIC("FATAL: GOP:  No space for a menu renderer: out of resources.");
+    }
+
+    Renderer->Redraw        = DrawMenu;
+    Renderer->Tick          = TimerTick;
+    This->MENU = Renderer;
+
+    InitMenu(FB);
+
+    /* Prepare some other independent display components and artifacts. */
+    Status = NewObjectBlt((FB->Resolution.Width / 2) - MIN(250, (FB->Resolution.Width / 4)),
+                          (FB->Resolution.Height / 5),
+                          MIN(500, (FB->Resolution.Width / 2)),
+                          MIN(250, (FB->Resolution.Height / 3)),
+                          1,
+                          &ProgressBlt);
+    if (EFI_ERROR(Status)) {
+        This->Panic(This, "Failed to allocate a BLT for the progress notifier.", FALSE, 0);
+        return EFI_NOT_STARTED;
+    }
+
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
+    BltPixelFromARGB(&p, CONFIG->Colors.Text.Background);
+    FB->ClearBlt(FB, ProgressBlt, &p);
+
+    Status = NewObjectBlt(ProgressBlt->Position.X,
+                          ProgressBlt->Position.Y,
+                          ProgressBlt->Dimensions.Width,
+                          ProgressBlt->Dimensions.Height,
+                          1,
+                          &MftahKeyPromptBlt);
+    if (EFI_ERROR(Status)) {
+        This->Panic(This, "Failed to allocate a BLT for the MFTAH key prompt.", FALSE, 0);
+        return EFI_NOT_STARTED;
+    }
+
+    FB->ClearBlt(FB, MftahKeyPromptBlt, &p);
+
+    Status = NewObjectBlt((FB->Resolution.Width / 2) - 100,
+                          ProgressBlt->Position.Y + ProgressBlt->Dimensions.Height + 30,
+                          200,
+                          200,
+                          2,
+                          &LoadingIconUnderlayBlt);
+    if (EFI_ERROR(Status)) {
+        This->Panic(This, "Failed to allocate the loading animation underlay BLT.", FALSE, 0);
+        return EFI_NOT_STARTED;
+    }
+
+    BltPixelFromARGB(&p, CONFIG->Colors.Background);
+    FB->ClearBlt(FB, LoadingIconUnderlayBlt, &p);
 
     /* Once the new mode initializes (if it was changed), the screen SHOULD turn black. */
     return EFI_SUCCESS;
 }
 
 
+STATIC
 EFI_STATUS
-GraphicsDestroy(BOOLEAN PreserveFramebuffer)
+GraphicsDestroy(IN CONST SIMPLE_DISPLAY *This)
 {
-    GraphicsDestroyMenu();
-    FreePool(GraphicsContext);
-
-    if (FALSE == PreserveFramebuffer) {
-        FramebufferDestroy();
-    }
-
-    return EFI_SUCCESS;
-}
-
-
-VOID
-GraphicsDestroyMenu(VOID)
-{
+    /* Destroy all menu renderable BLTs. */
     for (UINTN i = 0; i < RenderablesLength; ++i) {
         if (NULL == Renderables[i]) continue;
 
@@ -539,32 +602,254 @@ GraphicsDestroyMenu(VOID)
 
         Renderables[i] = NULL;
     }
-
     RenderablesLength = 0;
-}
 
+    /* Delete any independently tracked BLT buffers. */
+    BltDestroy(ProgressBlt);
+    BltDestroy(LoadingIconUnderlayBlt);
+    BltDestroy(MftahKeyPromptBlt);
 
-EFI_STATUS
-GraphicsModePopulateMenu(OUT EFI_MENU_RENDERER_PROTOCOL *Renderer)
-{
-    if (NULL == Renderer) return EFI_INVALID_PARAMETER;
+    /* Free the GUI context. */
+    FreePool(GraphicsContext);
 
-    Renderer->Initialize    = InitMenu;
-    Renderer->InputPopup    = InputPopup;
-    Renderer->Confirmation  = Confirmation;
-    Renderer->Popup         = Popup;
-    Renderer->WarningPopup  = WarningPopup;
-    Renderer->Redraw        = DrawMenu;
-    Renderer->ClearScreen   = ClearScreen;
-    Renderer->Tick          = TimerTick;
+    /* Free protocol pointers. */
+    FreePool((VOID *)FB->BLT->Buffer);
+    FreePool(FB->BLT);
+    FreePool(FB);
+    FB = NULL;
+
+    FreePool(This->MENU);
 
     return EFI_SUCCESS;
 }
 
 
-// TODO: Perhaps this should be moved to the FB file as a method on the 'protocol'
+STATIC
 VOID
-GPrint(CHAR *restrict Str,
+GraphicsClearScreen(IN CONST SIMPLE_DISPLAY *This,
+                    IN UINT32 Color)
+{
+    FB->ClearScreen(FB, Color);
+    FB->Flush(FB);
+}
+
+
+STATIC
+VOID
+GraphicsPanic(IN CONST SIMPLE_DISPLAY *This,
+              IN CHAR8 *Message,
+              IN BOOLEAN IsShutdown,
+              IN UINTN ShutdownTimer)
+{
+    CHAR8 *Shadow = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) + (AsciiStrLen(Message) + 7 + 1));
+
+    if (NULL == Shadow) {
+        GPrint(Message, FB->BLT, 20, 20, 0xFFFF0000, 0, TRUE, 2);
+    } else {
+        AsciiSPrint(Shadow, (AsciiStrLen(Message) + 7), "PANIC: %a", Message);
+        GPrint(Shadow, FB->BLT, 20, 20, 0xFFFF0000, 0, TRUE, 2);
+        FreePool(Shadow);
+    }
+
+    FB->Flush(FB);
+
+    if (0 == ShutdownTimer) {
+        /* Default to 3 seconds. */
+        BS->Stall(3000000);
+    } else {
+        BS->Stall(ShutdownTimer);
+    }
+
+    if (TRUE == IsShutdown) {
+        Shutdown(EFI_SUCCESS);
+    }
+}
+
+
+STATIC
+VOID
+GraphicsPrintProgress(IN CONST SIMPLE_DISPLAY *This,
+                      IN CONST CHAR8 *Message,
+                      IN UINTN Current,
+                      IN UINTN OutOfTotal)
+{
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
+    BltPixelFromARGB(&p, CONFIG->Colors.Text.Background);
+    FB->ClearBlt(FB, ProgressBlt, &p);
+
+    FB_VERTEX ProgressRect = {
+        .X = ProgressBlt->Dimensions.Width / 8,
+        .Y = ProgressBlt->Dimensions.Height - 60
+    };
+    FB_VERTEX ProgressRectTo = {
+        .X = 7 * (ProgressBlt->Dimensions.Width / 8),
+        .Y = ProgressBlt->Dimensions.Height - 10
+    };
+    FB_VERTEX ProgressRectForegroundTo = {
+        .X = ProgressRect.X + ((Current * (ProgressRectTo.X - ProgressRect.X)) / OutOfTotal),
+        .Y = ProgressRectTo.Y
+    };
+
+    FB_VERTEX MessageAt = {
+        .X = (ProgressBlt->Dimensions.Width / 2) - ((AsciiStrLen(Message) * 2 * FB->BaseGlyphSize.Width) / 2),
+        .Y = 30
+    };
+
+    if (NULL != Message) {
+        FB->PrintString(FB,
+                        Message,
+                        ProgressBlt,
+                        &MessageAt,
+                        &(CONFIG->Colors.Text),
+                        FALSE,
+                        2);
+    }
+
+    /* Progress bar background, foreground, then box border. */
+    FB->DrawSimpleShape(
+        FB, ProgressBlt, FbShapeRectangle,
+        ProgressRect, ProgressRectTo, 0, TRUE, 1, CONFIG->Colors.Title.Background
+    );
+    FB->DrawSimpleShape(
+        FB, ProgressBlt, FbShapeRectangle,
+        ProgressRect, ProgressRectForegroundTo, 0, TRUE, 1, CONFIG->Colors.Title.Foreground
+    );
+    FB->DrawSimpleShape(
+        FB, ProgressBlt, FbShapeRectangle,
+        ProgressRect, ProgressRectTo, 0, FALSE, 1, 0x00000000
+    );
+
+    /* Full progress BLT box border. */
+    FB_VERTEX Origin = {0};
+    FB_VERTEX FullBltEnd = { .X = ProgressBlt->Dimensions.Width, .Y = ProgressBlt->Dimensions.Height };
+    FB->DrawSimpleShape(
+        FB, ProgressBlt, FbShapeRectangle,
+        Origin, FullBltEnd, 0, FALSE, 1, CONFIG->Colors.Text.Foreground
+    );
+
+    FB->RenderComponent(FB, ProgressBlt, TRUE);
+}
+
+
+STATIC
+VOID
+FlipToFalse(EFI_EVENT Event,
+            VOID *Context)
+{ BOOLEAN *b = (BOOLEAN *)Context; if (NULL != b) *b = FALSE; }
+
+STATIC
+VOID
+GraphicsStall(IN CONST SIMPLE_DISPLAY *This,
+              IN UINTN TimeInMilliseconds)
+{
+    VOLATILE BOOLEAN Stall = TRUE;
+    EFI_EVENT StallEvent = {0};
+
+    if (TRUE == CONFIG->Quick) return;
+
+    uefi_call_wrapper(BS->CreateEvent, 5, (EVT_TIMER | EVT_NOTIFY_SIGNAL), TPL_NOTIFY, FlipToFalse, (VOID *)&Stall, &StallEvent);
+    uefi_call_wrapper(BS->SetTimer, 3, StallEvent, TimerPeriodic, 10 * 1000 * TimeInMilliseconds);
+
+    if (EFI_ERROR(LoadingAnimationLoop(LoadingIconUnderlayBlt, ~(CONFIG->Colors.Background), &Stall))) {
+        /* Stall normally if the animation can't be rendered. */
+        uefi_call_wrapper(BS->Stall, 1, TimeInMilliseconds * 1000);
+    }
+
+    uefi_call_wrapper(BS->CloseEvent, 1, StallEvent);
+}
+
+
+STATIC
+VOID
+GraphicsInputPopup(IN CONST SIMPLE_DISPLAY *This,
+                   IN CHAR8 *CurrentInput,
+                   IN BOOLEAN IsHidden,
+                   IN CHAR8 *ErrorMessage OPTIONAL)
+{
+    CHAR8 *EnterPasswordMessage = "Enter Password:";
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
+
+    BltPixelFromARGB(&p, CONFIG->Colors.Text.Background);
+    FB->ClearBlt(FB, MftahKeyPromptBlt, &p);
+
+    FB_VERTEX PromptRect = {
+            .X = MftahKeyPromptBlt->Dimensions.Width / 8,
+            .Y = MftahKeyPromptBlt->Dimensions.Height - 30 - (3 * FB->BaseGlyphSize.Height)
+    };
+    FB_VERTEX PromptRectTo = {
+            .X = 7 * (MftahKeyPromptBlt->Dimensions.Width / 8),
+            .Y = MftahKeyPromptBlt->Dimensions.Height - 30
+    };
+
+    GPrint(EnterPasswordMessage,
+           MftahKeyPromptBlt,
+           (MftahKeyPromptBlt->Dimensions.Width / 2)
+               - ((AsciiStrLen(EnterPasswordMessage) * 2 * FB->BaseGlyphSize.Width) / 2),
+           20,
+           CONFIG->Colors.Text.Foreground,
+           CONFIG->Colors.Text.Background,
+           FALSE,
+           2);
+
+    if (NULL != ErrorMessage) {
+        GPrint(ErrorMessage,
+               MftahKeyPromptBlt,
+               (MftahKeyPromptBlt->Dimensions.Width / 2)
+                   - ((AsciiStrLen(ErrorMessage) * 1 * FB->BaseGlyphSize.Width) / 2),
+               20 + (2 * FB->BaseGlyphSize.Height) + 30,
+               0xFFFF0000,
+               0x00000000,
+               FALSE,
+               1);
+    }
+
+    /* Input bar background and border. */
+    FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, PromptRect, PromptRectTo, 0, TRUE, 1, CONFIG->Colors.Text.Foreground);
+    FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, PromptRect, PromptRectTo, 0, FALSE, 1, CONFIG->Colors.Text.Background);
+
+    /* Full BLT box border. */
+    FB_VERTEX Origin = {0};
+    FB_VERTEX FullBltEnd = { .X = MftahKeyPromptBlt->Dimensions.Width, .Y = MftahKeyPromptBlt->Dimensions.Height };
+    FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, Origin, FullBltEnd, 0, FALSE, 1, CONFIG->Colors.Title.Foreground);
+
+    /* Never exceed the width of the box when GPrint'ing. */
+    UINTN StarsToPrintInBox = MIN(
+        ((NULL == CurrentInput) ? 0 : AsciiStrLen(CurrentInput)),
+        ((PromptRectTo.X - PromptRect.X) / (2 * FB->BaseGlyphSize.Width))
+    );
+
+    /* Print the '*' characters to match the current length of the password or the max width. */
+    if (TRUE == IsHidden) {
+        for (UINTN i = 0; i < StarsToPrintInBox; ++i) {
+            GPrint("*",
+                   MftahKeyPromptBlt,
+                   PromptRect.X + 5 + (i * 2 * FB->BaseGlyphSize.Width),
+                   PromptRect.Y + (FB->BaseGlyphSize.Height / 2),
+                   CONFIG->Colors.Text.Background,
+                   CONFIG->Colors.Text.Foreground,
+                   FALSE,
+                   2);
+        }
+    } else if (NULL != CurrentInput) {
+        // TODO Long strings will bleed off the edge of the textbox.
+        GPrint(CurrentInput,
+               MftahKeyPromptBlt,
+               PromptRect.X,
+               PromptRect.Y,
+               CONFIG->Colors.Text.Background,
+               CONFIG->Colors.Text.Foreground,
+               FALSE,
+               2);
+    }
+
+    /* Finally, render it all. */
+    FB->RenderComponent(FB, MftahKeyPromptBlt, TRUE);
+}
+
+
+STATIC
+VOID
+GPrint(CHAR8 *Str,
        BOUNDED_SHAPE *ObjectBltBuffer,
        UINTN X,
        UINTN Y,
@@ -580,40 +865,14 @@ GPrint(CHAR *restrict Str,
         || 0 == FontScale
     ) return;
 
-    UINTN i = 0;
-    CHAR *p = Str;
-    for (; *p; ++p, ++i) {
-        if ('\n' == *p && TRUE == Wrap) {
-            i = 0;
-            Y += (FontScale * FB->BaseGlyphSize.Height);
+    FB_VERTEX At = { .X = X, .Y = Y };
+    COLOR_PAIR Color = { .Foreground = Foreground, .Background = Background };
 
-            continue;
-        }
-
-        /* Try to wrap text inside the BLT. */
-        if (X + ((i+1) * FontScale * FB->BaseGlyphSize.Width) > ObjectBltBuffer->Dimensions.Width) {
-            /* If wrapping is disabled, stop drawing here. */
-            if (FALSE == Wrap) return;
-
-            i = 0;
-            Y += (FontScale * FB->BaseGlyphSize.Height);
-        }
-
-        // if (Y > ObjectBltBuffer->Dimensions.Height) return;
-
-        FB->RenderGlyph(FB,
-                        ObjectBltBuffer,
-                        *p,
-                        X + (i * FontScale * FB->BaseGlyphSize.Width),
-                        Y,
-                        Foreground,
-                        Background,
-                        TRUE,
-                        FontScale);
-    }
+    FB->PrintString(FB, Str, ObjectBltBuffer, &At, &Color, Wrap, FontScale);
 }
 
 
+STATIC
 EFI_STATUS
 LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
                      UINT32 ColorARGB,
@@ -722,7 +981,6 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
         FB->FlushPartial(FB, Position.X, Position.Y, Position.X, Position.Y, Size.Width, Size.Height);
 
         /* 25 ms delay between shifts */
-        // TODO: Better timing
         uefi_call_wrapper(BS->Stall, 1, 25000);
     }
 

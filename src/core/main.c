@@ -1,5 +1,11 @@
 #include "../include/mftah_uefi.h"
+
 #include "../include/drivers/all.h"
+
+#include "../include/core/input.h"
+#include "../include/core/util.h"
+
+#include "../include/loaders/loader.h"
 
 
 
@@ -19,9 +25,10 @@ UINT64 gRamdiskImageLength;
 
 
 
-STATIC VOID EnvironmentInitialize(
-    IN EFI_HANDLE ImageHandle
-);
+STATIC VOID EnvironmentInitialize(IN EFI_HANDLE ImageHandle);
+
+STATIC EFI_STATUS EnterMenu();
+STATIC EFI_STATUS MenuLoop(IN MENU_STATE *m);
 
 
 EFI_STATUS
@@ -31,15 +38,10 @@ efi_main(EFI_HANDLE ImageHandle,
 {
     /* Local variable initializations. */
     EFI_STATUS Status = EFI_SUCCESS;
-    CONFIGURATION *c = NULL;
 
     /* Initialize the loader. */
     InitializeLib(ImageHandle, SystemTable);
     ENTRY_HANDLE = ImageHandle;
-
-    /* Disable the UEFI watchdog timer. The code '0x1FFFF' is a dummy
-        value and doesn't actually do anything. Not a magic number. */
-    ERRCHECK_UEFI(BS->SetWatchdogTimer, 4, 0, 0x1FFFF, 0, NULL);
 
     /* Load all necessary MFTAH supplementary drivers. */
     EnvironmentInitialize(ImageHandle);
@@ -48,59 +50,49 @@ efi_main(EFI_HANDLE ImageHandle,
         presented with a prompt to enter its filename. */
     Status = ConfigParse(ImageHandle, DefaultConfigFileName);
     if (EFI_ERROR(Status)) {
-        PANIC("Invalid or missing configuration!");
+        // TODO Provide more information about the problem and status.
+        PANIC("Invalid or missing configuration.");
     }
 
     /* Sleep for 1s to show the boot logo, because... because it just should, ok?? */
-    // uefi_call_wrapper(BS->Stall, 1, 1000000);
-
-    /* Build and display the menu based on the configured mode. This is
-        actually the point where the application will enter 'graphical'
-        mode, if selected. The application will spin here until it's done. */
-    c = ConfigGet();
-    if (NULL == c) {
-        PANIC("Failed to acquire a configuration instance.");
-    }
+    uefi_call_wrapper(BS->Stall, 1, 1000000);
 
     /* The menus will be responsible for carrying out the rest of the process. */
-    if (c->Mode & GRAPHICAL) {
-        PRINTLN("Entering graphical mode...");
-
-        if (EFI_ERROR((Status = GraphicsInit(c)))) {
-            PANIC("Failed to initialize the GOP driver for GRAPHICAL `display` mode.");
-        }
-    } else {
-        PRINTLN("Entering text mode...");
-
-        if (EFI_ERROR((Status = TextModeInit(c)))) {
-            PANIC("Failed to initialize the TEXT `display` mode.");
-        }
+    Status = DisplaysSetMode(CONFIG->Mode, TRUE);
+    if (EFI_ERROR(Status) || NULL == DISPLAY) {
+        PANIC("Failed to set display mode.");
     }
 
-    Status = EnterMenu(c);
-
+    /* Initialize the display driver. */
+    Status = DISPLAY->Initialize(DISPLAY, CONFIG);
     if (EFI_ERROR(Status)) {
-        /* If this was a TEXT mode error already, exit. */
-        if (c->Mode & TEXT) return Status;
+        EFI_WARNINGLN("Native mode initialization failed with code (%u). Falling back.", Status);
 
-        /* From Graphics mode, try to enter the menu in TEXT mode. */
-        c->Mode = TEXT;
-        GraphicsDestroy(FALSE);   /* do not capture return values here */
+        // TODO: Change configuration values to their defaults for opposite-mode compatibility.
+        DISPLAY_MODE AlternateMode = (CONFIG->Mode & GRAPHICAL) ? TEXT : GRAPHICAL;
+        //ConfigChangeMode(AlternateMode);
 
-        // TODO: Change configuration values to their defaults for TEXT-mode compatibility.
-
-        TextModeInit(c);
-        EFI_DANGERLN("DANGER:  Graphics driver failure; falling back to TEXT mode.");
-        uefi_call_wrapper(BS->Stall, 1, 1000000);
-
-        ERRCHECK(EnterMenu(c));
+        DisplaysSetMode(AlternateMode, TRUE);
+        Status = DISPLAY->Initialize(DISPLAY, CONFIG);
+        if (EFI_ERROR(Status)) {
+            PANIC("Failed to initialize any valid display driver.");
+        }
     }
+
+    /* Disable the UEFI watchdog timer. The code '0x1FFFF' is a dummy
+        value and doesn't actually do anything. Not a magic number. */
+    // TODO! Convert all uefi_call_Wrapper usages to the ordinary style.
+    BS->SetWatchdogTimer(0, 0x1FFFF, 0, NULL);
+
+    Status = EnterMenu();
+    if (EFI_ERROR(Status)) {
+        // TODO better info
+        PANIC("Menu retured error");
+    }
+
+    PANIC("The loader menu exited with no error code. This should never happen; please reboot.");
 
     /* Execution should never return here. */
-    FreePool(c);
-    Status = EFI_END_OF_FILE;
-    PANIC("Reached the end. How did you get here?");
-
     return EFI_SUCCESS;
 }
 
@@ -117,12 +109,12 @@ EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
     uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
     for (UINTN i = 0; i < 30; ++i) PRINT("\r\n");
 
-    // EFI_COLOR(MFTAH_COLOR_ASCII_ART);
-    // PRINTLN(
-    //     "\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>\r\n%s",
-    //     MFTAH_UEFI_VERSION, LIBMFTAH_VERSION, MftahAsciiArt
-    // );
-    // EFI_COLOR(MFTAH_COLOR_DEFAULT);
+    EFI_COLOR(MFTAH_COLOR_ASCII_ART);
+    PRINTLN(
+        "\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>\r\n%s",
+        MFTAH_UEFI_VERSION, LIBMFTAH_VERSION, MftahAsciiArt
+    );
+    EFI_COLOR(MFTAH_COLOR_DEFAULT);
 
     /* All drivers are initialized before the configuration is parsed. This
         means that they are all REQUIRED regardless of selected options. */
@@ -133,16 +125,202 @@ EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
     }
 
     if (EFI_ERROR((Status = MftahInit())) || NULL == MftahGetInstance()) {
-        ABORT("Failed to initialize the MFTAH adapter driver.");
+        ABORT("Failed to initialize the MFTAH driver.");
     }
 
     if (EFI_ERROR((Status = RamdiskDriverInit(ImageHandle)))) {
         ABORT("Failed to initialize the ramdisk driver.");
     }
 
-    if (EFI_ERROR((Status = ConfigInit()))) {
-        ABORT("Failed to initialize the default configuration and driver.");
+    if (EFI_ERROR((Status = ConfigInit())) || NULL == CONFIG) {
+        ABORT("Failed to initialize the configuration driver.");
     }
 
     PRINTLN("ok");
 }
+
+
+EFI_STATUS
+EnterMenu()
+{
+    EFI_STATUS Status = EFI_SUCCESS;
+
+    /* Sanity checking. */
+    if (0 == CONFIG->ChainsLength) {
+        // TODO: Should return codes here instead of panicking.
+        PANIC("No chains were found to load!");
+    } else if (CONFIG_MAX_CHAINS < CONFIG->ChainsLength) {
+        PANIC("Too many chains were found to load!");
+    } else if (NULL == DISPLAY->MENU) {
+        PANIC("The MENU object is not initialized.");
+    }
+
+    MENU_STATE *MenuState = (MENU_STATE *)AllocateZeroPool(sizeof(MENU_STATE));
+    if (NULL == MenuState) {
+        PANIC("Unable to allocate menu state: out of resources.");
+    }
+
+    for (UINTN i = 0; i < CONFIG->ChainsLength; ++i) {
+        if (CONFIG->Chains[i]->IsImmediate) {
+            CHAR8 *ValidationErrorMsg = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * 256);
+            if (NULL == ValidationErrorMsg) {
+                // TODO: Error popup?? Out of memory, so this might mean the program needs to stop.
+            }
+
+            /* Open the chain immediately. */
+            FreePool(ValidationErrorMsg);
+            FreePool(MenuState);
+
+            LoaderEnterChain(i);
+
+            return EFI_SUCCESS;   /* SHOULD never be reached, but just in case (tm) */
+        }
+
+        if (CONFIG->Chains[i]->IsDefault) {
+            /* NOTE: It is intentional that multiple 'default' statements will 
+                automatically choose the last Chain set with it. */
+            MenuState->CurrentItemIndex = i;
+            /* This property is for global timeouts. */
+            MenuState->DefaultItemindex = i;
+        }
+
+        MenuState->ItemsList[i].Chain = CONFIG->Chains[i];
+        MenuState->ItemsList[i].ConfiguredChainIndex = i;
+        MenuState->ItemsList[i].Enabled = TRUE;
+        MenuState->ItemsList[i].Text = CONFIG->Chains[i]->Name;
+
+        ++MenuState->ItemsListLength;
+    }
+
+    /* Initial rendering. */
+    DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+    DISPLAY->MENU->Redraw(MenuState);
+
+    /* Enter the loop. */
+    Status = MenuLoop(MenuState);
+    if (EFI_ERROR(Status)) {
+        EFI_DANGERLN("MENU:  Loop broken with error (%u).", Status);
+        goto EnterMenu__Error;
+    }
+
+    /* Technically, this function should never return here. */
+    return EFI_SUCCESS;
+
+EnterMenu__Error:
+    FreePool(MenuState);
+    return Status;
+}
+
+
+STATIC
+EFIAPI
+EFI_STATUS
+MenuLoop(IN MENU_STATE *m)
+{
+    EFI_STATUS Status = EFI_SUCCESS;
+    EFI_EVENT TimerEvent = {0};
+    EFI_KEY_DATA KeyData = {0};
+
+    /* Create the timer's 'Tick' event. */
+    ERRCHECK_UEFI(BS->CreateEvent, 5,
+                  (EVT_TIMER | EVT_NOTIFY_SIGNAL),
+                  TPL_NOTIFY,
+                  DISPLAY->MENU->Tick,
+                  (VOID *)m,
+                  &TimerEvent);
+
+    /* The UEFI spec says the timer interval is every 100 nanoseconds,
+        so convert that to approximately 100 milliseconds. */
+    ERRCHECK_UEFI(BS->SetTimer, 3,
+                  TimerEvent,
+                  TimerPeriodic,
+                  1 * 100 * 1000 * 10);
+
+MenuLoop__Main:
+    Status = ReadKey(&KeyData,
+                     (FALSE == m->KeyPressReceived && CONFIG->Timeout > 0)
+                        ? (CONFIG->Timeout + 200)
+                        : 0);
+
+    if (EFI_ERROR(Status) && EFI_TIMEOUT != Status) {
+        DISPLAY->Panic(DISPLAY, "Unknown keyboard input failure.", FALSE, 0);
+        uefi_call_wrapper(BS->Stall, 1, 3000000);
+
+        Status = EFI_DEVICE_ERROR;
+        goto MenuLoop__Break;
+    }
+
+    if (TRUE == m->TimeoutOccurred || EFI_TIMEOUT == Status) {
+        m->CurrentItemIndex = m->DefaultItemindex;
+        goto MenuLoop__SelectEntry;
+    }
+
+    m->KeyPressReceived = TRUE;   /* Can use this to cancel the regular timeout */
+
+    switch (KeyData.Key.ScanCode) {
+        /* NOTE: Up and down are switched because of the menu rendering layout. */
+        case SCAN_DOWN:
+        case SCAN_PAGE_DOWN:
+            if (m->CurrentItemIndex < (m->ItemsListLength-1)) m->CurrentItemIndex++;
+            goto MenuLoop__Redraw;
+        case SCAN_UP:
+        case SCAN_PAGE_UP:
+            if (m->CurrentItemIndex > 0) m->CurrentItemIndex--;
+            goto MenuLoop__Redraw;
+        case SCAN_ESC:
+            if (
+                (
+                    KeyData.KeyState.KeyShiftState & EFI_SHIFT_STATE_VALID
+                    && (
+                        (KeyData.KeyState.KeyShiftState & EFI_LEFT_CONTROL_PRESSED)
+                        || (KeyData.KeyState.KeyShiftState & EFI_RIGHT_CONTROL_PRESSED)
+                    )
+                )
+                || READKEY_FALLBACK_INDICATOR == KeyData.KeyState.KeyShiftState
+            ) {
+                uefi_call_wrapper(BS->CloseEvent, 1, TimerEvent);
+                DISPLAY->ClearScreen(DISPLAY, 0);
+                Reboot(EFI_SUCCESS);
+            }
+            break;
+        default: break;
+    }
+
+    switch (KeyData.Key.UnicodeChar) {
+        case L'\r':
+        case L'\n':
+        MenuLoop__SelectEntry:
+            /* Be sure to temporarily stop the timer from updating the framebuffer. */
+            m->PauseTickRenders = TRUE;
+
+            CHAR8 *ValidationErrorMsg = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * 256);
+            if (NULL == ValidationErrorMsg) {
+                // TODO: Error popup?? Out of memory, so this might mean the program needs to stop.
+            }
+
+            /* The chain's rudimentary validation has passed. Pass along basically
+                the entire program context and attempt to load the chain.  */
+            uefi_call_wrapper(BS->CloseEvent, 1, TimerEvent);
+            FreePool(ValidationErrorMsg);
+
+            UINTN index = m->CurrentItemIndex;
+            FreePool(m);
+
+            /* you are now leaving the main menu :) */
+            DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+            LoaderEnterChain(index);
+
+            return EFI_SUCCESS;   /* SHOULD never be reached, but just in case (tm) */
+
+        default: goto MenuLoop__Main;   /* Do nothing on invalid keystrokes */
+    }
+
+MenuLoop__Redraw:
+    DISPLAY->MENU->Redraw(m);
+    goto MenuLoop__Main;
+
+MenuLoop__Break:
+    uefi_call_wrapper(BS->CloseEvent, 1, TimerEvent);
+    return Status;
+}
+

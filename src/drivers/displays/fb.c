@@ -1,11 +1,11 @@
-#include "../../include/drivers/displays/fb.h"
+#include "../../include/drivers/fb.h"
 
 #include "../../include/fonts/orchid.h"
 #include "../../include/core/util.h"
 
 
 
-CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *FB = NULL;
+EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *FB = NULL;
 CONST double PI = 3.14159265358979323846;
 
 
@@ -13,13 +13,13 @@ CONST double PI = 3.14159265358979323846;
 STATIC
 EFIAPI
 VOID
-FlushFramebufferPartial(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-                        UINTN X,
-                        UINTN Y,
-                        UINTN ToX,
-                        UINTN ToY,
-                        UINTN Width,
-                        UINTN Height)
+FlushFramebufferPartial(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+                        IN UINTN X,
+                        IN UINTN Y,
+                        IN UINTN ToX,
+                        IN UINTN ToY,
+                        IN UINTN Width,
+                        IN UINTN Height)
 {
     if (NULL == This) return;
 
@@ -37,7 +37,7 @@ FlushFramebufferPartial(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 VOID
-FlushFramebuffer(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This)
+FlushFramebuffer(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This)
 {
     FlushFramebufferPartial(
         This,
@@ -51,10 +51,10 @@ FlushFramebuffer(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This)
 STATIC
 EFIAPI
 EFI_PHYSICAL_ADDRESS
-GetPixel(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-         BOUNDED_SHAPE *ObjectBltBuffer,
-         UINTN X,
-         UINTN Y)
+GetPixel(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+         IN BOUNDED_SHAPE *ObjectBltBuffer,
+         IN UINTN X,
+         IN UINTN Y)
 {
     if (
         NULL == ObjectBltBuffer
@@ -73,12 +73,12 @@ GetPixel(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 VOID
-SetPixel(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-         BOUNDED_SHAPE *ObjectBltBuffer,
-         UINTN X,
-         UINTN Y,
-         UINT32 ARGB)
-{
+SetPixel(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+         IN BOUNDED_SHAPE *ObjectBltBuffer,
+         IN UINTN X,
+         IN UINTN Y,
+         IN UINT32 ARGB)
+{IN 
     EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
 
     p.Red   = (ARGB & 0x00FF0000) >> 16;
@@ -96,12 +96,12 @@ SetPixel(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 EFI_STATUS
-FastBltToBlt(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-             BOUNDED_SHAPE *DestinationBlt,
-             BOUNDED_SHAPE *SourceBlt,
-             FB_VERTEX IntoPosition,
-             FB_VERTEX FromPosition,
-             FB_DIMENSION Dimension)
+FastBltToBlt(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+             IN BOUNDED_SHAPE *DestinationBlt,
+             IN BOUNDED_SHAPE *SourceBlt,
+             IN FB_VERTEX IntoPosition,
+             IN FB_VERTEX FromPosition,
+             IN FB_DIMENSION Dimension)
 {
     if (
         NULL == This
@@ -149,9 +149,9 @@ FastBltToBlt(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 VOID
-ClearBlt(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-         BOUNDED_SHAPE *ObjectBltBuffer,
-         EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Pixel)
+ClearBlt(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+         IN BOUNDED_SHAPE *ObjectBltBuffer,
+         IN EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Pixel)
 {
     if (
         NULL == This
@@ -174,8 +174,8 @@ ClearBlt(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 VOID
-ClearScreen(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-            UINT32 ARGB)
+ClearScreen(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+            IN UINT32 ARGB)
 {
     EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
 
@@ -192,15 +192,15 @@ ClearScreen(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 EFI_STATUS
-RenderGlyph(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-            BOUNDED_SHAPE *ObjectBltBuffer,
-            CHAR8 Glyph,
-            UINTN X,
-            UINTN Y,
-            UINT32 Foreground,
-            UINT32 Background,
-            BOOLEAN HasShadow,
-            UINTN Zoom)
+RenderGlyph(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+            IN BOUNDED_SHAPE *ObjectBltBuffer,
+            IN CHAR8 Glyph,
+            IN UINTN X,
+            IN UINTN Y,
+            IN UINT32 Foreground,
+            IN UINT32 Background,
+            IN BOOLEAN HasShadow,
+            IN UINTN Zoom)
 {
     if (
         NULL == This
@@ -239,12 +239,73 @@ RenderGlyph(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 
 STATIC
 EFIAPI
+EFI_STATUS
+PrintString(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+            IN CHAR8 *Str,
+            IN BOUNDED_SHAPE *ObjectBltBuffer,
+            IN OUT FB_VERTEX *Start,
+            IN COLOR_PAIR *Colors,
+            IN BOOLEAN Wrap,
+            IN UINT8 FontScale)
+{
+    if (
+        NULL == This
+        || NULL == Str
+        || 0 == AsciiStrLen(Str)
+        || NULL == ObjectBltBuffer
+        || NULL == Start
+        || NULL == Colors
+        || Start->X > This->Resolution.Width
+        || Start->Y > This->Resolution.Height
+        || 0 == FontScale
+    ) return EFI_INVALID_PARAMETER;
+
+    UINTN i = 0;
+    CHAR *p = Str;
+    for (; *p; ++p, ++i) {
+        if ('\n' == *p && TRUE == Wrap) {
+            i = 0;
+            Start->Y += (FontScale * This->BaseGlyphSize.Height);
+
+            continue;
+        }
+
+        /* Try to wrap text inside the BLT. */
+        if (Start->X + ((i+1) * FontScale * This->BaseGlyphSize.Width) > ObjectBltBuffer->Dimensions.Width) {
+            /* If wrapping is disabled, stop drawing here. */
+            if (FALSE == Wrap) {
+                Start->X += (i * FontScale * This->BaseGlyphSize.Width);   /* update the X position where it stopped */
+                return EFI_SUCCESS;
+            }
+
+            i = 0;
+            Start->Y += (FontScale * This->BaseGlyphSize.Height);
+        }
+
+        /* Render the individual glyph. */
+        This->RenderGlyph(This,
+                          ObjectBltBuffer,
+                          *p,
+                          Start->X + (i * FontScale * This->BaseGlyphSize.Width),
+                          Start->Y,
+                          Colors->Foreground,
+                          Colors->Background,
+                          TRUE,
+                          FontScale);
+    }
+
+    return EFI_SUCCESS;
+}
+
+
+STATIC
+EFIAPI
 VOID
-DrawLine(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-         BOUNDED_SHAPE *ObjectBltBuffer,
-         FB_VERTEX From,
-         FB_VERTEX To,
-         UINT32 Color)
+DrawLine(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+         IN BOUNDED_SHAPE *ObjectBltBuffer,
+         IN FB_VERTEX From,
+         IN FB_VERTEX To,
+         IN UINT32 Color)
 {
     if (
         NULL == This
@@ -290,12 +351,12 @@ DrawLine(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 EFI_STATUS
-DrawPolygon(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-            BOUNDED_SHAPE *ObjectBltBuffer,
-            UINTN VertexCount,
-            FB_VERTEX *VertexList,
-            UINT32 Color,
-            BOOLEAN ConnectLastPoint)
+DrawPolygon(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+            IN BOUNDED_SHAPE *ObjectBltBuffer,
+            IN UINTN VertexCount,
+            IN FB_VERTEX *VertexList,
+            IN UINT32 Color,
+            IN BOOLEAN ConnectLastPoint)
 {
     if (
         NULL == This
@@ -322,29 +383,15 @@ DrawPolygon(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 STATIC
 EFIAPI
 EFI_STATUS
-DrawBoxBorder(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-              BOUNDED_SHAPE *ObjectBltBuffer,
-              UINTN Thickness,
-              BOOLEAN Gradient,
-              UINT32 OuterColor,
-              UINT32 InnerColor)
-{
-    return EFI_SUCCESS;
-}
-
-
-STATIC
-EFIAPI
-EFI_STATUS
-DrawSimpleShape(EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
-                BOUNDED_SHAPE *ObjectBltBuffer,
-                FB_SHAPE_TYPE Type,
-                FB_VERTEX From,
-                FB_VERTEX To,
-                UINTN RotationDegrees,
-                BOOLEAN Fill,
-                UINTN BorderThickness,
-                UINT32 Color)
+DrawSimpleShape(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
+                IN BOUNDED_SHAPE *ObjectBltBuffer,
+                IN FB_SHAPE_TYPE Type,
+                IN FB_VERTEX From,
+                IN FB_VERTEX To,
+                IN UINTN RotationDegrees,
+                IN BOOLEAN Fill,
+                IN UINTN BorderThickness,
+                IN UINT32 Color)
 {
     if (
         NULL == This
@@ -437,18 +484,18 @@ RenderComponent(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 
     /* Copy the BLT up to the root BLT and publish it. */
     FB_VERTEX Origin = {0};
-    FB->BltToBlt(FB,
-                 FB->BLT,
-                 ObjectBltBuffer,
-                 ObjectBltBuffer->Position,
-                 Origin,
-                 ObjectBltBuffer->Dimensions);
+    This->BltToBlt(This,
+                   This->BLT,
+                   ObjectBltBuffer,
+                   ObjectBltBuffer->Position,
+                   Origin,
+                   ObjectBltBuffer->Dimensions);
 
     if (TRUE == Flush) {
-        FB->FlushPartial(FB,
-                         ObjectBltBuffer->Position.X, ObjectBltBuffer->Position.Y,
-                         ObjectBltBuffer->Position.X, ObjectBltBuffer->Position.Y,
-                         ObjectBltBuffer->Dimensions.Width, ObjectBltBuffer->Dimensions.Height);
+        This->FlushPartial(This,
+                           ObjectBltBuffer->Position.X, ObjectBltBuffer->Position.Y,
+                           ObjectBltBuffer->Position.X, ObjectBltBuffer->Position.Y,
+                           ObjectBltBuffer->Dimensions.Width, ObjectBltBuffer->Dimensions.Height);
     }
 
     return Status;
@@ -456,7 +503,7 @@ RenderComponent(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 
 
 EFI_STATUS
-FramebufferInit(EFI_GRAPHICS_OUTPUT_PROTOCOL *GOP)
+FramebufferInit(IN EFI_GRAPHICS_OUTPUT_PROTOCOL *GOP)
 {
     EFI_STATUS Status = EFI_SUCCESS;
 
@@ -475,6 +522,7 @@ FramebufferInit(EFI_GRAPHICS_OUTPUT_PROTOCOL *GOP)
     FrameBuff->BltToBlt         = FastBltToBlt;
     FrameBuff->ClearScreen      = ClearScreen;
     FrameBuff->RenderGlyph      = RenderGlyph;
+    FrameBuff->PrintString      = PrintString;
     FrameBuff->DrawSimpleShape  = DrawSimpleShape;
     FrameBuff->DrawPolygon      = DrawPolygon;
     FrameBuff->RenderComponent  = RenderComponent;
@@ -535,7 +583,7 @@ FramebufferInit(EFI_GRAPHICS_OUTPUT_PROTOCOL *GOP)
 
 
 VOID
-BltDestroy(BOUNDED_SHAPE *Blt)
+BltDestroy(IN BOUNDED_SHAPE *Blt)
 {
     if (NULL == Blt) return;
 
@@ -544,24 +592,13 @@ BltDestroy(BOUNDED_SHAPE *Blt)
 }
 
 
-VOID
-FramebufferDestroy(VOID)
-{
-    if (NULL == FB) return;
-
-    FreePool((VOID *)(FB->BLT->Buffer));
-    FreePool(FB->BLT);
-    FreePool(FB);
-}
-
-
 EFI_STATUS
-NewObjectBlt(UINTN AtX,
-             UINTN AtY,
-             UINTN Width,
-             UINTN Height,
-             UINTN ZIndex,
-             BOUNDED_SHAPE **Out)
+NewObjectBlt(IN UINTN AtX,
+             IN UINTN AtY,
+             IN UINTN Width,
+             IN UINTN Height,
+             IN UINTN ZIndex,
+             OUT BOUNDED_SHAPE **Out)
 {
     BOUNDED_SHAPE *ret = NULL;
 
@@ -605,8 +642,8 @@ NewObjectBlt(UINTN AtX,
 
 
 VOID
-BltPixelFromARGB(EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p,
-                 UINT32 Color)
+BltPixelFromARGB(IN EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p,
+                 IN UINT32 Color)
 {
     if (NULL == p) return;
 
@@ -618,7 +655,7 @@ BltPixelFromARGB(EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p,
 
 
 UINT32
-ARGBFromBltPixel(EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p)
+ARGBFromBltPixel(IN EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p)
 {
     if (NULL == p) return 0;
 
@@ -631,7 +668,7 @@ ARGBFromBltPixel(EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p)
 
 
 VOID
-BltPixelInvert(EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p)
+BltPixelInvert(IN EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p)
 {
     if (NULL == p) return;
 

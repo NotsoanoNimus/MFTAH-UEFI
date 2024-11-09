@@ -1,4 +1,13 @@
-#include "../../include/drivers/displays/text.h"
+#include "../../include/drivers/displays.h"
+
+
+
+/* Forward declarations. */
+
+/* Construct the static display protocol instance. */
+SIMPLE_DISPLAY TUI = {
+    .MENU       = NULL,
+};
 
 
 

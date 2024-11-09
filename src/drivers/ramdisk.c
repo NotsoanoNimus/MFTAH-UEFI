@@ -91,7 +91,6 @@ STATIC
 EFI_STATUS
 RamDiskPublishSsdt(VOID)
 {
-    EFI_STATUS Status;
     UINTN DummySsdtTableKey = 0;   /* don't care about preserving this returned value */
     EFI_ACPI_TABLE_PROTOCOL *ACPI = AcpiGetInstance();
 

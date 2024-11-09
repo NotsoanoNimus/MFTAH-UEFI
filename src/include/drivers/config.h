@@ -33,7 +33,7 @@ struct {
     BOOLEAN         IsRequired;
     CHAR8           *MFTAHKey;
     CHAR8           *Path;
-} __attribute__((packed)) DATA_RAMDISK;
+} DATA_RAMDISK;
 
 /* Options representing a config 'chain' block. */
 typedef
@@ -50,19 +50,20 @@ struct {
     BOOLEAN         IsDefault;
     DATA_RAMDISK    *DataRamdisks[MAX_DATA_RAMDISKS_PER_CHAIN];
     UINT8           DataRamdisksLength;
-} __attribute__((packed)) CONFIG_CHAIN_BLOCK;
+} CONFIG_CHAIN_BLOCK;
 
 typedef
 enum {
     TEXT        = (1 << 1),
-    GRAPHICAL   = (1 << 2)
+    GRAPHICAL   = (1 << 2),
+    NONE        = (1 << 3)
 } DISPLAY_MODE;
 
 typedef
 struct {
     UINT32  Foreground;
     UINT32  Background;
-} __attribute__((packed)) COLOR_PAIR;
+} COLOR_PAIR;
 
 typedef
 struct {
@@ -83,17 +84,19 @@ struct {
 typedef
 struct {
     CHAR8               *Title;
-    DISPLAY_MODE        Mode;
+    CHAR8               *Banner;
+    CONFIG_COLORS       Colors;
     BOOLEAN             AutoMode;
     BOOLEAN             Quick;
-    CONFIG_COLORS       Colors;
+    DISPLAY_MODE        Mode;
     UINT8               Scale;
     UINTN               Timeout;
     UINTN               MaxTimeout;
-    CHAR8               *Banner;
-    CONFIG_CHAIN_BLOCK  *Chains[CONFIG_MAX_CHAINS];
     UINTN               ChainsLength;
-} __attribute__((packed)) CONFIGURATION;
+    CONFIG_CHAIN_BLOCK  *Chains[CONFIG_MAX_CHAINS];
+} CONFIGURATION;
+
+EXTERN CONFIGURATION *CONFIG;
 
 
 /**
@@ -123,16 +126,6 @@ ConfigDestroy(VOID);
  */
 VOID
 ConfigDestroyChain(CONFIG_CHAIN_BLOCK *c);
-
-
-/**
- * Retrieve a heap copy of the current configuration.
- * 
- * @returns A pointer to a newly-allocated copy of the current runtime configuration. \
- *          The caller is responsible for freeing this. NULL on error or out of resources.
- */
-CONFIGURATION *
-ConfigGet(VOID);
 
 
 /**

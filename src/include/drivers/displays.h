@@ -29,6 +29,13 @@ struct {
 #pragma pack(pop)
 
 
+EXTERN CHAR8 *NormalTimeoutStr;
+EXTERN CHAR8 *MaxTimeoutStr;
+EXTERN CHAR8 *NoTimeoutStr;
+EXTERN CHAR8 *DefaultTimeoutStr;
+EXTERN CHAR8 *MaxTimeoutExceededtStr;
+
+
 typedef
 VOID
 (EFIAPI *MENU_HOOK__REDRAW)(
@@ -149,6 +156,7 @@ typedef
 VOID
 (EFIAPI *HOOK_DISPLAY_MODE__INPUT_POPUP)(
     IN  CONST   SIMPLE_DISPLAY  *This,
+    IN  CHAR8                   *Prompt,
     IN  CHAR8                   *CurrentInput,
     IN  BOOLEAN                 IsHidden,
     IN  CHAR8                   *ErrorMessage   OPTIONAL

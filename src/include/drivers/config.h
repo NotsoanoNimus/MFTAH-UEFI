@@ -74,9 +74,11 @@ struct {
     COLOR_PAIR  Title;
     COLOR_PAIR  Timer;
     COLOR_PAIR  PromptPopup;
-    COLOR_PAIR  InfoPopup;
-    COLOR_PAIR  WarningPopup;
 } CONFIG_COLORS;
+
+#define CONFIG_TEXT_COLOR(name) \
+    (0x7F & EFI_TEXT_ATTR(CONFIG->Colors.name.Foreground, CONFIG->Colors.name.Background))
+
 
 /* A meta-structure holding the applications runtime configuration. This
     is initially populated with defaults upon driver initialization, but

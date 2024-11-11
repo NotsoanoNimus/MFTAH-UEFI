@@ -5,6 +5,13 @@
 
 
 
+CHAR8 *NormalTimeoutStr = "Choosing default selection in %u seconds.";
+CHAR8 *MaxTimeoutStr = "Global timeout in %u seconds.";
+CHAR8 *NoTimeoutStr = "No timeout values are set.";
+CHAR8 *DefaultTimeoutStr = "Choosing default menu option...";
+CHAR8 *MaxTimeoutExceededtStr = "Maximum timeout exceeded! Shutting down!";
+
+
 typedef
 enum {
     OverlayHidden = 0,
@@ -79,6 +86,7 @@ STATIC VOID GraphicsStall(
 
 STATIC VOID GraphicsInputPopup(
     IN CONST SIMPLE_DISPLAY *This,
+    IN CHAR8 *Prompt,
     IN CHAR8 *CurrentInput,
     IN BOOLEAN IsHidden,
     IN CHAR8 *ErrorMessage OPTIONAL
@@ -384,10 +392,10 @@ TimerTick(EFI_EVENT Event,
         Shutdown(EFI_TIMEOUT);
     }
 
-    if (!(m->MillisecondsElapsed % 1000) && FALSE == m->PauseTickRenders) {
-        CHAR8 *NormalTimeoutStr = "Choosing default selection in %u seconds.";
-        CHAR8 *MaxTimeoutStr = "Global timeout in %u seconds.";
-
+    if (
+        0 == (m->MillisecondsElapsed % 1000)
+        && FALSE == m->PauseTickRenders
+    ) {
         /* I know I can get rid of the >0 stuff here, I just don't want to. */
         BOOLEAN NormalTimeoutActive = (
             m->MillisecondsElapsed < GraphicsContext->NormalTimeout
@@ -428,7 +436,9 @@ EFI_STATUS
 GraphicsInit(IN SIMPLE_DISPLAY *This,
              IN CONFIGURATION *Configuration)
 {
-    if (NULL == Configuration) return EFI_INVALID_PARAMETER;
+    if (NULL == This || NULL == Configuration) {
+        return EFI_INVALID_PARAMETER;
+    }
 
     EFI_STATUS Status = EFI_SUCCESS;
 
@@ -440,6 +450,11 @@ GraphicsInit(IN SIMPLE_DISPLAY *This,
                   &gEfiGraphicsOutputProtocolGuid,
                   NULL,
                   (VOID **)&GOP);
+
+    /* Sanity check. */
+    if (NULL == GOP) {
+        return EFI_NOT_STARTED;
+    }
 
     /* Skip video mode auto-selection when set by config. */
     if (FALSE == Configuration->AutoMode) goto GraphicsInit__SkipVideoMode;
@@ -511,6 +526,10 @@ GraphicsInit__SkipVideoMode:
     /* Initialize the graphics context. IF the video is above a certain resolution,
         set the zoom and other display context items appropriately. */
     GraphicsContext = (GRAPHICS_CONTEXT *)AllocateZeroPool(sizeof(GRAPHICS_CONTEXT));
+    if (NULL == GraphicsContext) {
+        EFI_DANGERLN("ERROR: GOP:  Out of resources while allocating context.");
+        return EFI_OUT_OF_RESOURCES;
+    }
 
     /* No tricks here... */
     GraphicsContext->Zoom = Configuration->Scale;
@@ -532,7 +551,8 @@ GraphicsInit__SkipVideoMode:
     EFI_MENU_RENDERER_PROTOCOL *Renderer = (EFI_MENU_RENDERER_PROTOCOL *)
         AllocateZeroPool(sizeof(EFI_MENU_RENDERER_PROTOCOL));
     if (NULL == Renderer) {
-        PANIC("FATAL: GOP:  No space for a menu renderer: out of resources.");
+        EFI_DANGERLN("FATAL: GOP:  No space for a menu renderer: out of resources.");
+        return EFI_OUT_OF_RESOURCES;
     }
 
     Renderer->Redraw        = DrawMenu;
@@ -641,7 +661,8 @@ GraphicsPanic(IN CONST SIMPLE_DISPLAY *This,
               IN BOOLEAN IsShutdown,
               IN UINTN ShutdownTimer)
 {
-    CHAR8 *Shadow = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) + (AsciiStrLen(Message) + 7 + 1));
+    CHAR8 *Shadow = (CHAR8 *)
+        AllocateZeroPool(sizeof(CHAR8) + (AsciiStrLen(Message) + 7 + 1));
 
     if (NULL == Shadow) {
         GPrint(Message, FB->BLT, 20, 20, 0xFFFF0000, 0, TRUE, 2);
@@ -762,13 +783,18 @@ GraphicsStall(IN CONST SIMPLE_DISPLAY *This,
 STATIC
 VOID
 GraphicsInputPopup(IN CONST SIMPLE_DISPLAY *This,
+                   IN CHAR8 *Prompt,
                    IN CHAR8 *CurrentInput,
                    IN BOOLEAN IsHidden,
                    IN CHAR8 *ErrorMessage OPTIONAL)
 {
-    CHAR8 *EnterPasswordMessage = "Enter Password:";
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
+    if (
+        NULL == This
+        || NULL == Prompt
+        || NULL == CurrentInput
+    ) return;
 
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL p = {0};
     BltPixelFromARGB(&p, CONFIG->Colors.Text.Background);
     FB->ClearBlt(FB, MftahKeyPromptBlt, &p);
 
@@ -781,10 +807,10 @@ GraphicsInputPopup(IN CONST SIMPLE_DISPLAY *This,
             .Y = MftahKeyPromptBlt->Dimensions.Height - 30
     };
 
-    GPrint(EnterPasswordMessage,
+    GPrint(Prompt,
            MftahKeyPromptBlt,
            (MftahKeyPromptBlt->Dimensions.Width / 2)
-               - ((AsciiStrLen(EnterPasswordMessage) * 2 * FB->BaseGlyphSize.Width) / 2),
+               - ((AsciiStrLen(Prompt) * 2 * FB->BaseGlyphSize.Width) / 2),
            20,
            CONFIG->Colors.Text.Foreground,
            CONFIG->Colors.Text.Background,
@@ -1097,9 +1123,6 @@ DECL_DRAW_FUNC(Banner)
 DECL_DRAW_FUNC(Timeouts)
 {
     EFI_GRAPHICS_OUTPUT_BLT_PIXEL timeout = {0};
-    CHAR8 *NoTimeoutStr = "No timeout values are set.";
-    CHAR8 *DefaultTimeoutStr = "Choosing default menu option...";
-    CHAR8 *MaxTimeoutStr = "Maximum timeout exceeded! Shutting down!";
 
     BltPixelFromARGB(&timeout, c->Colors.Timer.Background);
     FB->ClearBlt(FB, This, &timeout);
@@ -1142,7 +1165,7 @@ DECL_DRAW_FUNC(Timeouts)
                    FALSE,
                    GraphicsContext->Zoom);
         } else {
-            GPrint(MaxTimeoutStr,
+            GPrint(MaxTimeoutExceededtStr,
                    This,
                    LAYOUT_G_TEXT_LEFT_PADDING,
                    LAYOUT_G_GLYPH_HEIGHT,

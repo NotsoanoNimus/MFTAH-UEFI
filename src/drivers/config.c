@@ -39,11 +39,11 @@ struct {
     CONST CHAR  *Name;
     UINTN       TextColor;
     UINT32      GraphicalColor;
-} __attribute__((packed)) CONFIG_COMMON_COLOR_TUPLE;
+} CONFIG_COMMON_COLOR_TUPLE;
 
 /* Foreground color mappings - Names to some common colors useable
     in both modes at any time. */
-CONST CONFIG_COMMON_COLOR_TUPLE CommonForegroundColors[] = {
+CONST CONFIG_COMMON_COLOR_TUPLE CommonNamedColors[] = {
     { "black",          EFI_BLACK,                  0x00000000 },
     { "blue",           EFI_BLUE,                   0xff000088 },
     { "green",          EFI_GREEN,                  0xff008800 },
@@ -62,25 +62,13 @@ CONST CONFIG_COMMON_COLOR_TUPLE CommonForegroundColors[] = {
     { NULL, 0, 0 }
 };
 
-CONST CONFIG_COMMON_COLOR_TUPLE CommonBackgroundColors[] = {
-    { "black",          EFI_BACKGROUND_BLACK,       0x00000000 },
-    { "blue",           EFI_BACKGROUND_BLUE,        0xff000088 },
-    { "green",          EFI_BACKGROUND_GREEN,       0xff008800 },
-    { "cyan",           EFI_BACKGROUND_CYAN,        0xff008888 },
-    { "red",            EFI_BACKGROUND_RED,         0xff880000 },
-    { "magenta",        EFI_BACKGROUND_MAGENTA,     0xff880088 },
-    { "brown",          EFI_BACKGROUND_BROWN,       0xff888800 },
-    { "lightgray",      EFI_BACKGROUND_LIGHTGRAY,   0xff888888 },
-    { NULL, 0, 0 }
-};
-
 /* Tuple structure to hold a command string (lowercase) corresponding
     to its generic handler method. */
 typedef
 struct {
     CONST CHAR  *Element;
     EFI_STATUS  (EFIAPI *Handler)(CHAR *Data);
-} __attribute__((packed)) CONFIG_HANDLER_TUPLE;
+} CONFIG_HANDLER_TUPLE;
 
 /* Construct a list of config handler methods. */
 #define DECL_HANDLER(name) \
@@ -101,9 +89,7 @@ DECL_HANDLER(color_text);
 DECL_HANDLER(color_banner);
 DECL_HANDLER(color_title);
 DECL_HANDLER(color_timer);
-DECL_HANDLER(color_popup_prompt);
-DECL_HANDLER(color_popup_info);
-DECL_HANDLER(color_popup_warning);
+DECL_HANDLER(color_popup);
 DECL_HANDLER(scale);
 DECL_HANDLER(name);
 DECL_HANDLER(payload);
@@ -135,9 +121,7 @@ CONST CONFIG_HANDLER_TUPLE ConfigHandlers[] = {
     DECL_TUPLE(color_banner),
     DECL_TUPLE(color_title),
     DECL_TUPLE(color_timer),
-    DECL_TUPLE(color_popup_prompt),
-    DECL_TUPLE(color_popup_info),
-    DECL_TUPLE(color_popup_warning),
+    DECL_TUPLE(color_popup),
     DECL_TUPLE(scale),
     DECL_TUPLE(name),
     DECL_TUPLE(payload),
@@ -249,27 +233,27 @@ ParseColor__Store:
         case TEXT:
             /* In TEXT mode, search the list of well-known colors. If none match, error. */
             for (UINTN i = 0; ; ++i) {
-                if (NULL == CommonForegroundColors[i].Name) {
+                if (NULL == CommonNamedColors[i].Name) {
                     ErrorMsg = L"That foreground color for TEXT mode was not found";
                     return EFI_INVALID_PARAMETER;
                 }
 
-                if (0 != CompareMem(Foreground, CommonForegroundColors[i].Name, ForegroundLength)) continue;
+                if (0 != CompareMem(Foreground, CommonNamedColors[i].Name, ForegroundLength)) continue;
 
-                Out->Foreground = CommonForegroundColors[i].TextColor;
+                Out->Foreground = CommonNamedColors[i].TextColor;
                 break;
             }
 
             if (BackgroundLength > 0) {
                 for (UINTN i = 0; ; ++i) {
-                    if (NULL == CommonBackgroundColors[i].Name) {
+                    if (NULL == CommonNamedColors[i].Name) {
                         ErrorMsg = L"That background color for TEXT mode was not found";
                         return EFI_INVALID_PARAMETER;
                     }
 
-                    if (0 != CompareMem(Background, CommonBackgroundColors[i].Name, BackgroundLength)) continue;
+                    if (0 != CompareMem(Background, CommonNamedColors[i].Name, BackgroundLength)) continue;
 
-                    Out->Background = CommonBackgroundColors[i].TextColor;
+                    Out->Background = CommonNamedColors[i].TextColor;
                     break;
                 }
             }
@@ -281,14 +265,14 @@ ParseColor__Store:
                 symbol, then it's a raw color. Otherwise, it should be looked up. */
             if ('%' != Foreground[0]) {
                 for (UINTN i = 0; ; ++i) {
-                    if (NULL == CommonForegroundColors[i].Name) {
+                    if (NULL == CommonNamedColors[i].Name) {
                         ErrorMsg = L"That foreground color for GRAPHICAL mode was not found";
                         return EFI_INVALID_PARAMETER;
                     }
 
-                    if (0 != CompareMem(Foreground, CommonForegroundColors[i].Name, ForegroundLength)) continue;
+                    if (0 != CompareMem(Foreground, CommonNamedColors[i].Name, ForegroundLength)) continue;
 
-                    Out->Foreground = CommonForegroundColors[i].GraphicalColor;
+                    Out->Foreground = CommonNamedColors[i].GraphicalColor;
                     break;
                 }
             } else {
@@ -303,14 +287,14 @@ ParseColor__Store:
             if (BackgroundLength > 0) {
                 if ('%' != Background[0]) {
                     for (UINTN i = 0; ; ++i) {
-                        if (NULL == CommonBackgroundColors[i].Name) {
+                        if (NULL == CommonNamedColors[i].Name) {
                             ErrorMsg = L"That background color for GRAPHICAL mode was not found";
                             return EFI_INVALID_PARAMETER;
                         }
 
-                        if (0 != CompareMem(Background, CommonBackgroundColors[i].Name, BackgroundLength)) continue;
+                        if (0 != CompareMem(Background, CommonNamedColors[i].Name, BackgroundLength)) continue;
 
-                        Out->Background = CommonBackgroundColors[i].GraphicalColor;
+                        Out->Background = CommonNamedColors[i].GraphicalColor;
                         break;
                     }
                 } else {
@@ -563,9 +547,9 @@ ConfigDumpChain(IN CONFIG_CHAIN_BLOCK *Chain,
         AsciiSPrint(
             (CHAR8 *)(((EFI_PHYSICAL_ADDRESS)(*ToBuffer)) + CurrentLength),
             (MaxBufferLength - CurrentLength),
-            "   { path(%a),  mftah(%u),  compressed(%u),  has_key(%u) }\n",
+            "   {  data_rd(%a | (m%1u:c%1u:k%1u)  }\n",
                 Chain->DataRamdisks[i]->Path, Chain->DataRamdisks[i]->IsMFTAH,
-                Chain->DataRamdisks[i]->IsCompressed, (FALSE != Chain->DataRamdisks[i]->MFTAHKey)
+                Chain->DataRamdisks[i]->IsCompressed, (NULL != Chain->DataRamdisks[i]->MFTAHKey)
         );
     }
 }
@@ -731,10 +715,6 @@ DECL_HANDLER(display)
             Configuration.Colors.Timer.Background = 0x00000000;
             Configuration.Colors.PromptPopup.Foreground = 0xffeeeeee;
             Configuration.Colors.PromptPopup.Background = 0xffbb2299;
-            Configuration.Colors.InfoPopup.Foreground = 0xffeeeeee;
-            Configuration.Colors.InfoPopup.Background = 0xff2222bb;
-            Configuration.Colors.WarningPopup.Foreground = 0xffeeeeee;
-            Configuration.Colors.WarningPopup.Background = 0xffbb2222;
 
             break;
 
@@ -753,10 +733,6 @@ DECL_HANDLER(display)
             Configuration.Colors.Timer.Background = EFI_BACKGROUND_BLACK;
             Configuration.Colors.PromptPopup.Foreground = EFI_WHITE;
             Configuration.Colors.PromptPopup.Background = EFI_BACKGROUND_MAGENTA;
-            Configuration.Colors.InfoPopup.Foreground = EFI_WHITE;
-            Configuration.Colors.InfoPopup.Background = EFI_BACKGROUND_BLUE;
-            Configuration.Colors.WarningPopup.Foreground = EFI_YELLOW;
-            Configuration.Colors.WarningPopup.Background = EFI_BACKGROUND_RED;
 
             break;
 
@@ -868,7 +844,9 @@ DECL_HANDLER(color_bg)
 
     /* The parsed foreground in this case is the lone color here, even if the
         user specified a pair of colors. */
-    Configuration.Colors.Background = pair.Foreground;
+    Configuration.Colors.Background = (Configuration.Mode & TEXT)
+        ? (0x7F & (pair.Foreground | (pair.Foreground << 4)))
+        : pair.Foreground;
     DPRINTLN("BACKGROUND COLOR SET.");
 
     return EFI_SUCCESS;
@@ -886,7 +864,9 @@ DECL_HANDLER(color_border)
 
     /* The parsed foreground in this case is the lone color here, even if the
         user specified a pair of colors. */
-    Configuration.Colors.Border = pair.Foreground;
+    Configuration.Colors.Border = (Configuration.Mode & TEXT)
+        ? (0x7F & (pair.Foreground | (pair.Foreground << 4)))
+        : pair.Foreground;
     DPRINTLN("BORDER COLOR SET.");
 
     return EFI_SUCCESS;
@@ -941,37 +921,13 @@ DECL_HANDLER(color_timer)
 }
 
 
-DECL_HANDLER(color_popup_prompt)
+DECL_HANDLER(color_popup)
 {
     EFI_STATUS Status = EFI_SUCCESS;
-    
+
     /* `ParseColor` takes care of setting error messages. */
     ERRCHECK(ParseColor(Data, &(Configuration.Colors.PromptPopup)));
     DPRINTLN("PROMPT POPUP COLOR SET.");
-
-    return EFI_SUCCESS;
-}
-
-
-DECL_HANDLER(color_popup_info)
-{
-    EFI_STATUS Status = EFI_SUCCESS;
-    
-    /* `ParseColor` takes care of setting error messages. */
-    ERRCHECK(ParseColor(Data, &(Configuration.Colors.InfoPopup)));
-    DPRINTLN("INFO POPUP COLOR SET.");
-
-    return EFI_SUCCESS;
-}
-
-
-DECL_HANDLER(color_popup_warning)
-{
-    EFI_STATUS Status = EFI_SUCCESS;
-    
-    /* `ParseColor` takes care of setting error messages. */
-    ERRCHECK(ParseColor(Data, &(Configuration.Colors.WarningPopup)));
-    DPRINTLN("WARNING POPUP COLOR SET.");
 
     return EFI_SUCCESS;
 }

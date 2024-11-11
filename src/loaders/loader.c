@@ -288,9 +288,15 @@ GetPassword__Repeat:
     do {
         PassLength = (p - Password);
 
-        DISPLAY->InputPopup(DISPLAY, Password, TRUE, InputErrorMessage);
+        DISPLAY->InputPopup(DISPLAY,
+                            "Enter Password:",
+                            Password,
+                            TRUE,
+                            InputErrorMessage);
+
         InputErrorMessage = NULL;
 
+GetPassword__NoRedraw:
         SetMem(&Key, sizeof(EFI_KEY_DATA), 0x00);
 
         if (EFI_ERROR(ReadKey(&Key, 0))) {
@@ -300,7 +306,7 @@ GetPassword__Repeat:
 
         switch (Key.Key.UnicodeChar) {
             case CHAR_BACKSPACE:
-                if (0 == PassLength) continue;
+                if (0 == PassLength) goto GetPassword__NoRedraw;
 
                 --p;
                 *p = '\0';
@@ -309,7 +315,7 @@ GetPassword__Repeat:
 
             case CHAR_CARRIAGE_RETURN:
             case CHAR_LINEFEED:
-                if (0 == PassLength) continue;
+                if (0 == PassLength) goto GetPassword__NoRedraw;
 
                 goto GetPassword__EnterKey;
 

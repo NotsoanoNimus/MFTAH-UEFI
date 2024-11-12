@@ -93,6 +93,24 @@ SecureWipe(
 
 
 /**
+ * Set an EFI variable for the loaded operating system to optionally access during runtime.
+ * 
+ * @param[in]   VariableName    The name of the EFI variable to set.
+ * @param[in]   Value           A pointer or direct value to set.
+ * @param[in]   ExplicitAccess  If set, overrides the variable access settings from their defaults.
+ * 
+ * @returns The EFI status of the SetVariable Runtime Services method.
+ */
+EFI_STATUS
+EFIAPI
+SetEfiVarsHint(
+    IN  CHAR16                  *VariableName,
+    IN  EFI_PHYSICAL_ADDRESS    Value,
+    IN  UINTN                   ExplicitAccess  OPTIONAL
+);
+
+
+/**
  * Generic shutdown function. Panics if a shutdown could not be completed.
  * 
  * @param[in]   Reason  Set to EFI_SUCCESS to indicate a normal shutdown. \

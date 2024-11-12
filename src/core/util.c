@@ -262,6 +262,23 @@ SecureWipe(IN VOID *Buffer,
 }
 
 
+EFI_STATUS
+EFIAPI
+SetEfiVarsHint(IN CHAR16 *VariableName,
+               IN EFI_PHYSICAL_ADDRESS Value,
+               IN UINTN ExplicitAccess OPTIONAL)
+{
+    return ST->RuntimeServices
+        ->SetVariable(VariableName,
+                      &gXmitVendorGuid,
+                      (0 != ExplicitAccess
+                          ? ExplicitAccess
+                          : (EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_BOOTSERVICE_ACCESS)),
+                      sizeof(EFI_PHYSICAL_ADDRESS),
+                      (VOID *)Value);
+}
+
+
 VOID
 EFIAPI
 Shutdown(IN CONST EFI_STATUS Reason)

@@ -4,6 +4,7 @@
 #include "../include/loaders/bin.h"
 
 #include "../include/drivers/ramdisk.h"
+#include "../include/drivers/displays.h"
 
 #include "../include/core/util.h"
 
@@ -35,6 +36,17 @@ LoadImage(IN LOADER_CONTEXT *Context)
     if (EFI_ERROR(Status)) {
         PANIC("Could not register the loaded ramdisk through the active protocol.");
     }
+
+    Status  = SetEfiVarsHint(L"MFTAH__RAMDISK_BASE", (EFI_PHYSICAL_ADDRESS)&(Context->LoadedImageBase), 0);
+    Status |= SetEfiVarsHint(L"MFTAH__RAMDISK_SIZE", (EFI_PHYSICAL_ADDRESS)&(Context->LoadedImageSize), 0);
+
+    /* Loaded ramdisks should always let the operating system know where to find them. */
+// TODO Probably move this into a config setting instead of a compile-time one.
+#if MFTAH_ENSURE_HINTS==1
+    if (EFI_ERROR(Status)) {
+        PANIC("Failed to set required ramdisk EFI hints.");
+    }
+#endif
 
     /* Next, find the target image to chainload and load it to another segment of reserved memory. */
     Status = uefi_call_wrapper(BS->LocateDevicePath, 3,

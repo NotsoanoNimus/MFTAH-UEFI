@@ -111,6 +111,9 @@ MftahUefi__wrapper__Print(mftah_log_level_t Level,
     if (MFTAH_LEVEL_DEBUG == Level) return;
 #endif
 
+    /* We actually don't want to output anything from the library that isn't important. */
+    if (MFTAH_LEVEL_ERROR != Level) return;
+
     /* For prints, we assume that all strings and other details will be safely 
         and dynamically pre-converted to wide characters. */
     va_list c;

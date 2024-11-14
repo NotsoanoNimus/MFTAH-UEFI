@@ -145,6 +145,9 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
     ) return EFI_INVALID_PARAMETER;
 
     EFI_STATUS Status = EFI_SUCCESS;
+    // TODO Move MFTAH out to a decorator... Starting to get real messy
+    mftah_status_t MftahStatus = MFTAH_SUCCESS;
+    mftah_protocol_t *MftahProtocol = NULL;
     UINTN at = 0, total = 100;
     VOID *LoadedRamdiskBase = NULL;
     UINTN LoadedRamdiskSize = 0;
@@ -211,6 +214,73 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
     FreePool(PayloadPath);
 
     // TODO: MFTAH decrypt & decompression -- these types of decorators need to be moved to a more generic function/place
+    // TODO This whole thing is sloppy and rushed for my own testing enjoyment.
+    if (TRUE == Ramdisk->IsMFTAH) {
+        if (NULL == Ramdisk->MFTAHKey || 0 == AsciiStrLen(Ramdisk->MFTAHKey)) {
+            // TODO get key
+            return EFI_INVALID_PASSWORD;
+        }
+
+        if (EFI_ERROR(MftahInit()) || NULL == (MftahProtocol = MftahGetInstance())) {
+            EFI_DANGERLN("Failed to create a MFTAH protocol instance.");
+            return EFI_OUT_OF_RESOURCES;
+        }
+
+        mftah_payload_t *PayloadWrapper = (mftah_payload_t *)AllocateZeroPool(sizeof(mftah_payload_t));
+        if (NULL == PayloadWrapper) {
+            EFI_DANGERLN("Failed to allocate a MFTAH payload meta object.");
+            return EFI_OUT_OF_RESOURCES;
+        }
+
+        if (MFTAH_ERROR(
+            MftahStatus = MftahProtocol->create_payload(MftahProtocol,
+                                                       (immutable_ref_t)LoadedRamdiskBase,
+                                                       (size_t)LoadedRamdiskSize,
+                                                       PayloadWrapper,
+                                                       NULL)
+        )) {
+            EFI_DANGERLN("Failed to create a MFTAH payload meta object.");
+            FreePool(PayloadWrapper);
+            return EFI_LOAD_ERROR;
+        }
+
+        if (MFTAH_ERROR(
+            (MftahStatus = MftahProtocol->check_password(MftahProtocol,
+                                                         PayloadWrapper,
+                                                         Ramdisk->MFTAHKey,
+                                                         AsciiStrLen(Ramdisk->MFTAHKey),
+                                                         MFTAH_CRYPT_HOOK_DEFAULT,
+                                                         NULL))
+        )) {
+            EFI_DANGERLN("Could not decrypt MFTAH ramdisk.");
+            FreePool(PayloadWrapper);
+            return EFI_INVALID_PASSWORD;
+        }
+
+        if (MFTAH_ERROR(
+            MftahStatus = MftahProtocol->decrypt(MftahProtocol,
+                                                 PayloadWrapper,
+                                                 Ramdisk->MFTAHKey,
+                                                 AsciiStrLen(Ramdisk->MFTAHKey),
+                                                 MFTAH_CRYPT_HOOK_DEFAULT,   /* TODO Use threading? */
+                                                 NULL)
+        )) {
+            /* TODO: Better reasons/error messages. */
+            EFI_DANGERLN("Failed to decrypt the MFTAH payload object. Code '%u'.", MftahStatus);
+            FreePool(PayloadWrapper);
+            return EFI_LOAD_ERROR;
+        }
+
+        /* Now that the payload is decrypted, lop off the initial 128-byte header and adjust. */
+        LoadedRamdiskBase += sizeof(mftah_payload_header_t);
+        LoadedRamdiskSize -= sizeof(mftah_payload_header_t);
+
+        FreePool(PayloadWrapper);
+
+        /* Clear the MFTAH Key location several times with garbage data. Freed later upon de-init. */
+        SecureWipe(Ramdisk->MFTAHKey, AsciiStrLen(Ramdisk->MFTAHKey));
+    }
+
     ERRCHECK(
         RAMDISK.Register((UINT64)LoadedRamdiskBase,
                          (UINT64)LoadedRamdiskSize,
@@ -490,6 +560,20 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
     /* Clear the screen. */
     DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
 
+    /* Load any data ramdisks that were specified in the chain.
+        NOTE: Failure to load these is not fatal unless otherwise specified. */
+    for (UINTN i = 0; i < chain->DataRamdisksLength; ++i) {
+        DATA_RAMDISK *r = chain->DataRamdisks[i];
+
+        Status = LoaderReadDataRamdisk(r, Context);
+        if (EFI_ERROR(Status) && TRUE == r->IsRequired) {
+            DISPLAY->Panic(DISPLAY, "Could not register the required data ramdisk.", TRUE, 10000000);
+        }
+    }
+
+    /* Clear the screen. */
+    DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+
     /* Read the payload file from block storage. */
     if (EFI_ERROR((Status = LoaderReadImage(Context)))) {
         DISPLAY->Panic(DISPLAY, "Failed to read the target payload into memory.", TRUE, 10000000);
@@ -526,19 +610,6 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
 
         if (EFI_ERROR((Status = LoaderDecompress(Context)))) {
             DISPLAY->Panic(DISPLAY, "Decompression returned an irrecoverable failure code.", TRUE, 10000000);
-        }
-    }
-
-    DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
-
-    /* Load any data ramdisks that were specified in the chain.
-        NOTE: Failure to load these is not fatal unless otherwise specified. */
-    for (UINTN i = 0; i < chain->DataRamdisksLength; ++i) {
-        DATA_RAMDISK *r = chain->DataRamdisks[i];
-
-        Status = LoaderReadDataRamdisk(r, Context);
-        if (EFI_ERROR(Status) && TRUE == r->IsRequired) {
-            DISPLAY->Panic(DISPLAY, "Could not register the required data ramdisk.", TRUE, 10000000);
         }
     }
 

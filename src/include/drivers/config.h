@@ -91,6 +91,7 @@ struct {
     CONFIG_COLORS       Colors;
     BOOLEAN             AutoMode;
     BOOLEAN             Quick;
+    BOOLEAN             RequireHints;
     DISPLAY_MODE        Mode;
     UINT8               Scale;
     UINTN               Timeout;

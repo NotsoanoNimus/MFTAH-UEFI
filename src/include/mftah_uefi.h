@@ -60,10 +60,6 @@
 /* The chunk sizes at which the ramdisk is loaded. */
 #define MFTAH_RAMDISK_LOAD_BLOCK_SIZE   (1 << 16)
 
-/* When set to 1, causes the application to PANIC if EFI variables
-    hinting toward the loaded ramdisk's location cannot be set. */
-#define MFTAH_ENSURE_HINTS  1
-
 /* The path to the executable to load within the decrypted boot image. */
 /* TODO: This should probably change with the ARCH selection. */
 #define MFTAH_BOOT_EXE_PATH     L"EFI\\BOOT\\BOOTX64.EFI"

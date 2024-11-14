@@ -40,13 +40,11 @@ LoadImage(IN LOADER_CONTEXT *Context)
     Status  = SetEfiVarsHint(L"MFTAH__RAMDISK_BASE", (EFI_PHYSICAL_ADDRESS)&(Context->LoadedImageBase), 0);
     Status |= SetEfiVarsHint(L"MFTAH__RAMDISK_SIZE", (EFI_PHYSICAL_ADDRESS)&(Context->LoadedImageSize), 0);
 
-    /* Loaded ramdisks should always let the operating system know where to find them. */
-// TODO Probably move this into a config setting instead of a compile-time one.
-#if MFTAH_ENSURE_HINTS==1
-    if (EFI_ERROR(Status)) {
+    /* Loaded ramdisks should always let the operating system know where to find them (by default). */
+    if (TRUE == CONFIG->RequireHints && EFI_ERROR(Status)) {
+        // TODO: Use displays panic
         PANIC("Failed to set required ramdisk EFI hints.");
     }
-#endif
 
     /* Next, find the target image to chainload and load it to another segment of reserved memory. */
     Status = uefi_call_wrapper(BS->LocateDevicePath, 3,

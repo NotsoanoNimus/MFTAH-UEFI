@@ -81,6 +81,7 @@ DECL_HANDLER(automode);
 DECL_HANDLER(timeout);
 DECL_HANDLER(max_timeout);
 DECL_HANDLER(quick);
+DECL_HANDLER(require_hints);
 DECL_HANDLER(banner);
 DECL_HANDLER(title);
 DECL_HANDLER(color_bg);
@@ -114,6 +115,7 @@ CONST CONFIG_HANDLER_TUPLE ConfigHandlers[] = {
     DECL_TUPLE(timeout),
     DECL_TUPLE(max_timeout),
     DECL_TUPLE(quick),
+    DECL_TUPLE(require_hints),
     DECL_TUPLE(banner),
     DECL_TUPLE(title),
     DECL_TUPLE(color_bg),
@@ -425,6 +427,7 @@ ConfigInit(VOID)
     Configuration.Mode              = GRAPHICAL;
     Configuration.AutoMode          = TRUE;
     Configuration.Quick             = FALSE;
+    Configuration.RequireHints      = TRUE;
     Configuration.Scale             = 1;
     Configuration.Timeout           = 5 * 1000;
     Configuration.MaxTimeout        = 300 * 1000;
@@ -795,6 +798,15 @@ DECL_HANDLER(quick)
 {
     Configuration.Quick = !!AsciiAtoi((CONST CHAR8 *)Data);
     DPRINTLN("QUICK SET FOR CHAIN");
+
+    return EFI_SUCCESS;
+}
+
+
+DECL_HANDLER(require_hints)
+{
+    Configuration.RequireHints = !!AsciiAtoi((CONST CHAR8 *)Data);
+    DPRINTLN("REQUIRE HINTS SET FOR CHAIN");
 
     return EFI_SUCCESS;
 }

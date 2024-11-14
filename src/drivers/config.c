@@ -97,6 +97,7 @@ DECL_HANDLER(target);
 DECL_HANDLER(now);
 DECL_HANDLER(type);
 DECL_HANDLER(subtype);
+DECL_HANDLER(cmdline);
 DECL_HANDLER(mftah);
 DECL_HANDLER(mftahkey);
 DECL_HANDLER(default);
@@ -129,6 +130,7 @@ CONST CONFIG_HANDLER_TUPLE ConfigHandlers[] = {
     DECL_TUPLE(now),
     DECL_TUPLE(type),
     DECL_TUPLE(subtype),
+    DECL_TUPLE(cmdline),
     DECL_TUPLE(mftah),
     DECL_TUPLE(mftahkey),
     DECL_TUPLE(default),
@@ -461,6 +463,7 @@ ConfigDestroyChain(CONFIG_CHAIN_BLOCK *c)
     FreePool(c->Name);
     FreePool(c->PayloadPath);
     FreePool(c->TargetPath);
+    FreePool(c->CmdLine);
 
     if (NULL != c->MFTAHKey) {
         SecureWipe(c->MFTAHKey, AsciiStrLen(c->MFTAHKey));
@@ -1047,6 +1050,11 @@ DECL_HANDLER(type)
     else if (AsciiStrLen(Data) >= 3 && 0 == CompareMem(Data, "exe", 3)) {
         Configuration.Chains[Configuration.ChainsLength]->Type = EXE;
     }
+    // TODO Create a Linux type that can branch to either EXE or ELF dep on kernel
+    else if (AsciiStrLen(Data) >= 5 && 0 == CompareMem(Data, "linux", 5)) {
+        /* Linux images with an EFI stub are often just EXEs to be chainloaded. */
+        Configuration.Chains[Configuration.ChainsLength]->Type = EXE;
+    }
     else if (AsciiStrLen(Data) >= 3 && 0 == CompareMem(Data, "elf", 3)) {
         Configuration.Chains[Configuration.ChainsLength]->Type = ELF;
     }
@@ -1075,6 +1083,10 @@ DECL_HANDLER(subtype)
     if (AsciiStrLen(Data) >= 3 && 0 == CompareMem(Data, "exe", 3)) {
         Configuration.Chains[Configuration.ChainsLength]->SubType = EXE;
     }
+    // TODO Create a Linux type that can branch to either EXE or ELF dep on kernel
+    else if (AsciiStrLen(Data) >= 5 && 0 == CompareMem(Data, "linux", 5)) {
+        Configuration.Chains[Configuration.ChainsLength]->SubType = EXE;
+    }
     else if (AsciiStrLen(Data) >= 3 && 0 == CompareMem(Data, "elf", 3)) {
         Configuration.Chains[Configuration.ChainsLength]->SubType = ELF;
     }
@@ -1087,6 +1099,28 @@ DECL_HANDLER(subtype)
     }
 
     DPRINTLN("SUBTYPE SET FOR CHAIN");
+
+    return EFI_SUCCESS;
+}
+
+
+DECL_HANDLER(cmdline)
+{
+    if (!IsWithinChain) {
+        ErrorMsg = HackeneyedChainOnlyStr;
+        return EFI_INVALID_PARAMETER;
+    }
+
+    UINTN Length = AsciiStrLen((CONST CHAR8 *)Data);
+    CHAR8 *line = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (Length + 1));
+    if (NULL == line) {
+        ErrorMsg = L"Failed to copy `cmdline` text: out of resources";
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    CopyMem(line, Data, Length);
+    Configuration.Chains[Configuration.ChainsLength]->CmdLine = line;
+    DPRINTLN("CMDLINE SET FOR CHAIN");
 
     return EFI_SUCCESS;
 }
@@ -1199,11 +1233,10 @@ DECL_HANDLER(data_ramdisk)
             }
             case '@': {
                 if (FALSE == CanStillSpecifyMftah) goto DataRamdisk__default_case;
+                r->IsMFTAH = TRUE;
 
                 if ('[' != *(p + 1)) {
                     CanStillSpecifyMftah = FALSE;
-
-                    r->IsMFTAH = TRUE;
                     r->MFTAHKey = NULL;
 
                     break;

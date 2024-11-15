@@ -249,6 +249,13 @@ BltDestroy(IN BOUNDED_SHAPE *Blt);
 
 
 VOID
+BltDrawOutline(
+    IN BOUNDED_SHAPE *Blt,
+    IN UINT32 Color
+);
+
+
+VOID
 BltPixelFromARGB(
     IN  EFI_GRAPHICS_OUTPUT_BLT_PIXEL   *p,                 
     IN  UINT32                          Color

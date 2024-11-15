@@ -593,6 +593,19 @@ BltDestroy(IN BOUNDED_SHAPE *Blt)
 }
 
 
+VOID
+BltDrawOutline(IN BOUNDED_SHAPE *Blt,
+               IN UINT32 Color)
+{
+    if (NULL == FB || NULL == Blt || NULL == Blt->Buffer) return;
+
+    FB_VERTEX Origin = {0};
+    FB_VERTEX FullBltEnd = { .X = Blt->Dimensions.Width - 1, .Y = Blt->Dimensions.Height - 1 };
+
+    FB->DrawSimpleShape(FB, Blt, FbShapeRectangle, Origin, FullBltEnd, 0, FALSE, 1, CONFIG->Colors.Title.Foreground);
+}
+
+
 EFI_STATUS
 NewObjectBlt(IN UINTN AtX,
              IN UINTN AtY,

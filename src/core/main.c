@@ -55,7 +55,7 @@ efi_main(EFI_HANDLE ImageHandle,
     }
 
     /* Sleep for 1s to show the boot logo, because... because it just should, ok?? */
-    // uefi_call_wrapper(BS->Stall, 1, 1000000);
+    BS->Stall(EFI_SECONDS_TO_MICROSECONDS(1));
 
     /* The menus will be responsible for carrying out the rest of the process. */
     Status = DisplaysSetMode(CONFIG->Mode, TRUE);
@@ -81,7 +81,6 @@ efi_main(EFI_HANDLE ImageHandle,
 
     /* Disable the UEFI watchdog timer. The code '0x1FFFF' is a dummy
         value and doesn't actually do anything. Not a magic number. */
-    // TODO! Convert all uefi_call_Wrapper usages to the ordinary style.
     BS->SetWatchdogTimer(0, 0x1FFFF, 0, NULL);
 
     Status = EnterMenu();
@@ -105,16 +104,16 @@ EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
     EFI_STATUS Status;
 
     /* Banner antix */
-    // EFI_COLOR(MFTAH_COLOR_DEFAULT);
-    // uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
-    // for (UINTN i = 0; i < 30; ++i) PRINT("\r\n");
+    EFI_COLOR(MFTAH_COLOR_DEFAULT);
+    ST->ConOut->ClearScreen(ST->ConOut);
+    for (UINTN i = 0; i < 30; ++i) PRINT("\r\n");
 
-    // EFI_COLOR(MFTAH_COLOR_ASCII_ART);
-    // PRINTLN(
-    //     "\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>\r\n%s",
-    //     MFTAH_UEFI_VERSION, LIBMFTAH_VERSION, MftahAsciiArt
-    // );
-    // EFI_COLOR(MFTAH_COLOR_DEFAULT);
+    EFI_COLOR(MFTAH_COLOR_ASCII_ART);
+    PRINTLN(
+        "\r\nMFTAH Chainloader v%s (libmftah v%s)\r\n    Copyright (c) 2024 Zack Puhl <github@xmit.xyz>\r\n%s",
+        MFTAH_UEFI_VERSION, LIBMFTAH_VERSION, MftahAsciiArt
+    );
+    EFI_COLOR(MFTAH_COLOR_DEFAULT);
 
     /* All drivers are initialized before the configuration is parsed. This
         means that they are all REQUIRED regardless of selected options. */
@@ -222,19 +221,19 @@ MenuLoop(IN MENU_STATE *m)
     EFI_KEY_DATA KeyData = {0};
 
     /* Create the timer's 'Tick' event. */
-    ERRCHECK_UEFI(BS->CreateEvent, 5,
-                  (EVT_TIMER | EVT_NOTIFY_SIGNAL),
-                  TPL_NOTIFY,
-                  DISPLAY->MENU->Tick,
-                  (VOID *)m,
-                  &TimerEvent);
+    ERRCHECK(
+        BS->CreateEvent((EVT_TIMER | EVT_NOTIFY_SIGNAL),
+                       TPL_NOTIFY,
+                       DISPLAY->MENU->Tick,
+                       (VOID *)m,
+                       &TimerEvent)
+    );
 
     /* The UEFI spec says the timer interval is every 100 nanoseconds,
         so convert that to approximately 100 milliseconds. */
-    ERRCHECK_UEFI(BS->SetTimer, 3,
-                  TimerEvent,
-                  TimerPeriodic,
-                  1 * 100 * 1000 * 10);
+    ERRCHECK(
+        BS->SetTimer(TimerEvent, TimerPeriodic, EFI_MILLISECONDS_TO_100NS(100))
+    );
 
 MenuLoop__Main:
     Status = ReadKey(&KeyData,
@@ -244,7 +243,7 @@ MenuLoop__Main:
 
     if (EFI_ERROR(Status) && EFI_TIMEOUT != Status) {
         DISPLAY->Panic(DISPLAY, "Unknown keyboard input failure.", FALSE, 0);
-        uefi_call_wrapper(BS->Stall, 1, 3000000);
+        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
 
         Status = EFI_DEVICE_ERROR;
         goto MenuLoop__Break;
@@ -278,7 +277,7 @@ MenuLoop__Main:
                 )
                 || READKEY_FALLBACK_INDICATOR == KeyData.KeyState.KeyShiftState
             ) {
-                uefi_call_wrapper(BS->CloseEvent, 1, TimerEvent);
+                BS->CloseEvent(TimerEvent);
                 DISPLAY->ClearScreen(DISPLAY, 0);
                 Reboot(EFI_SUCCESS);
             }
@@ -300,7 +299,7 @@ MenuLoop__Main:
 
             /* The chain's rudimentary validation has passed. Pass along basically
                 the entire program context and attempt to load the chain.  */
-            uefi_call_wrapper(BS->CloseEvent, 1, TimerEvent);
+            BS->CloseEvent(TimerEvent);
             FreePool(ValidationErrorMsg);
 
             UINTN index = m->CurrentItemIndex;
@@ -320,7 +319,7 @@ MenuLoop__Redraw:
     goto MenuLoop__Main;
 
 MenuLoop__Break:
-    uefi_call_wrapper(BS->CloseEvent, 1, TimerEvent);
+    BS->CloseEvent(TimerEvent);
     return Status;
 }
 

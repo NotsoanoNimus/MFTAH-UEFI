@@ -326,22 +326,22 @@ RamDiskRegister(IN UINT64 RamDiskBase,
     RamDiskInitBlockIo(PrivateData);
 
     /* Install EFI_DEVICE_PATH_PROTOCOL & EFI_BLOCK_IO(2)_PROTOCOL on a new handle. */
-    Status = uefi_call_wrapper(BS->InstallMultipleProtocolInterfaces, 8,
-                               &PrivateData->Handle,
-                               &gEfiBlockIoProtocolGuid,
-                               &PrivateData->BlockIo,
-                               &gEfiBlockIo2ProtocolGuid,
-                               &PrivateData->BlockIo2,
-                               &gEfiDevicePathProtocolGuid,
-                               PrivateData->DevicePath,
-                               NULL);
+    Status = BS->InstallMultipleProtocolInterfaces(
+        &PrivateData->Handle,
+        &gEfiBlockIoProtocolGuid,
+        &PrivateData->BlockIo,
+        &gEfiBlockIo2ProtocolGuid,
+        &PrivateData->BlockIo2,
+        &gEfiDevicePathProtocolGuid,
+        PrivateData->DevicePath,
+        NULL
+    );
     if (EFI_ERROR(Status)) goto ErrorExit;
 
-    Status = uefi_call_wrapper(BS->ConnectController, 4,
-                               PrivateData->Handle,
-                               NULL,
-                               NULL,
-                               TRUE);
+    Status = BS->ConnectController(PrivateData->Handle,
+                                   NULL,
+                                   NULL,
+                                   TRUE);
     if (EFI_ERROR(Status)) goto ErrorExit;
 
     FreePool(RamDiskDevNode);
@@ -378,11 +378,9 @@ RamDiskUnregister(IN EFI_DEVICE_PATH_PROTOCOL *DevicePath)
         return EFI_INVALID_PARAMETER;
     }
 
-    uefi_call_wrapper(BS->UninstallMultipleProtocolInterfaces, 3,
-                      DevicePath,
-                      &gEfiRamdiskGuid,
-                      NULL);
-
+    BS->UninstallMultipleProtocolInterfaces(DevicePath,
+                                            &gEfiRamdiskGuid,
+                                            NULL);
     return EFI_SUCCESS;
 }
 
@@ -391,11 +389,12 @@ EFI_STATUS
 EFIAPI
 RamdiskDriverInit(IN EFI_HANDLE ImageHandle)
 {
-    return uefi_call_wrapper(BS->InstallMultipleProtocolInterfaces, 4,
-                             &ImageHandle,
-                             &gEfiRamdiskGuid,
-                             &RAMDISK,
-                             NULL);
+    return BS->InstallMultipleProtocolInterfaces(
+        &ImageHandle,
+        &gEfiRamdiskGuid,
+        &RAMDISK,
+        NULL
+    );
 }
 
 
@@ -576,7 +575,7 @@ RamDiskBlkIo2ReadBlocksEx(IN EFI_BLOCK_IO2_PROTOCOL *This,
     /* If the caller's event is given, signal it after the memory read completes. */
     if ((NULL != Token) && (NULL != Token->Event)) {
         Token->TransactionStatus = EFI_SUCCESS;
-        uefi_call_wrapper(BS->SignalEvent, 1, Token->Event);
+        BS->SignalEvent(Token->Event);
     }
 
     return EFI_SUCCESS;
@@ -609,7 +608,7 @@ RamDiskBlkIo2WriteBlocksEx(IN EFI_BLOCK_IO2_PROTOCOL *This,
     /* If the caller's event is given, signal it after the memory write completes. */
     if ((NULL != Token) && (NULL != Token->Event)) {
         Token->TransactionStatus = EFI_SUCCESS;
-        uefi_call_wrapper(BS->SignalEvent, 1, Token->Event);
+        BS->SignalEvent(Token->Event);
     }
 
     return EFI_SUCCESS;
@@ -632,7 +631,7 @@ RamDiskBlkIo2FlushBlocksEx(IN EFI_BLOCK_IO2_PROTOCOL *This,
     /* If the caller's event is given, signal it directly. */
     if ((NULL != Token) && (NULL != Token->Event)) {
         Token->TransactionStatus = EFI_SUCCESS;
-        uefi_call_wrapper(BS->SignalEvent, 1, Token->Event);
+        BS->SignalEvent(Token->Event);
     }
 
     return EFI_SUCCESS;

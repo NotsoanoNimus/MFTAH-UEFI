@@ -366,11 +366,11 @@ TimerTick(EFI_EVENT Event,
         && m->MillisecondsElapsed >= GraphicsContext->NormalTimeout
     ) {
         /* A normal timeout has occurred. Signal to the menu handler. */
-        uefi_call_wrapper(BS->CloseEvent, 1, Event);
+        BS->CloseEvent(Event);
 
         GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, CONFIG, m, NULL);
         FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
-        uefi_call_wrapper(BS->Stall, 1, 2000000);
+        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(2));
 
         m->TimeoutOccurred = TRUE;
         return;
@@ -383,11 +383,11 @@ TimerTick(EFI_EVENT Event,
         /* THE MAX TIMEOUT IS REACHED. REDRAW THE BLT (it will now have a red message)
             AND SHUT DOWN THE DEVICE.*/
         /* First, cancel the event. */
-        uefi_call_wrapper(BS->CloseEvent, 1, Event);
+        BS->CloseEvent(Event);
 
         GraphicsContext->TimeoutsLayer->Draw(GraphicsContext->TimeoutsLayer, CONFIG, m, NULL);
         FB->RenderComponent(FB, GraphicsContext->TimeoutsLayer, TRUE);
-        uefi_call_wrapper(BS->Stall, 1, 2000000);
+        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(2));
 
         Shutdown(EFI_TIMEOUT);
     }
@@ -446,10 +446,11 @@ GraphicsInit(IN SIMPLE_DISPLAY *This,
     UINTN GraphicsInfoSize = 0, NumberOfModes, NativeMode,
         BestMode = 0, LargestBufferSize = 0;
 
-    ERRCHECK_UEFI(BS->LocateProtocol, 3,
-                  &gEfiGraphicsOutputProtocolGuid,
-                  NULL,
-                  (VOID **)&GOP);
+    ERRCHECK(
+        BS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid,
+                           NULL,
+                           (VOID **)&GOP)
+    );
 
     /* Sanity check. */
     if (NULL == GOP) {
@@ -460,14 +461,13 @@ GraphicsInit(IN SIMPLE_DISPLAY *This,
     if (FALSE == Configuration->AutoMode) goto GraphicsInit__SkipVideoMode;
 
 Init__QueryMode:
-    Status = uefi_call_wrapper(GOP->QueryMode, 4,
-                               GOP,
-                               ((NULL == GOP->Mode) ? 0 : GOP->Mode->Mode),
-                               &GraphicsInfoSize,
-                               &GraphicsInfo);
+    Status = GOP->QueryMode(GOP,
+                            ((NULL == GOP->Mode) ? 0 : GOP->Mode->Mode),
+                            &GraphicsInfoSize,
+                            &GraphicsInfo);
     if (EFI_NOT_STARTED == Status) {
         /* Need to run a 'SetMode' first. */
-        ERRCHECK_UEFI(GOP->SetMode, 2, GOP, 0);
+        ERRCHECK(GOP->SetMode(GOP, 0));
         goto Init__QueryMode;
     } else if (EFI_ERROR(Status)) {
         EFI_DANGERLN("Failure querying GOP video modes.");
@@ -486,7 +486,7 @@ Init__QueryMode:
     PRINTLN("GOP:  Inspecting %u video modes...", NumberOfModes);
 
     for (UINTN i = 0; i < NumberOfModes; ++i) {
-        Status = uefi_call_wrapper(GOP->QueryMode, 4, GOP, i, &GraphicsInfoSize, &GraphicsInfo);
+        Status = GOP->QueryMode(GOP, i, &GraphicsInfoSize, &GraphicsInfo);
 
         if (EFI_ERROR(Status)) {
             EFI_WARNINGLN("NOTICE: GOP:  Error while querying mode #%u (Code %u).", i, Status);
@@ -520,7 +520,7 @@ Init__QueryMode:
         make sure the mode is changeable, that there are no problems, and that we
         actually get everything initialized that we need. */
     PRINTLN("Setting video mode #%u...", BestMode);
-    ERRCHECK_UEFI(GOP->SetMode, 2, GOP, BestMode);
+    ERRCHECK(GOP->SetMode(GOP, BestMode));
 
 GraphicsInit__SkipVideoMode:
     /* Initialize the graphics context. IF the video is above a certain resolution,
@@ -768,15 +768,15 @@ GraphicsStall(IN CONST SIMPLE_DISPLAY *This,
 
     if (TRUE == CONFIG->Quick) return;
 
-    uefi_call_wrapper(BS->CreateEvent, 5, (EVT_TIMER | EVT_NOTIFY_SIGNAL), TPL_NOTIFY, FlipToFalse, (VOID *)&Stall, &StallEvent);
-    uefi_call_wrapper(BS->SetTimer, 3, StallEvent, TimerPeriodic, 10 * 1000 * TimeInMilliseconds);
+    BS->CreateEvent((EVT_TIMER | EVT_NOTIFY_SIGNAL), TPL_NOTIFY, FlipToFalse, (VOID *)&Stall, &StallEvent);
+    BS->SetTimer(StallEvent, TimerPeriodic, 10 * 1000 * TimeInMilliseconds);
 
     if (EFI_ERROR(LoadingAnimationLoop(LoadingIconUnderlayBlt, ~(CONFIG->Colors.Background), &Stall))) {
         /* Stall normally if the animation can't be rendered. */
-        uefi_call_wrapper(BS->Stall, 1, TimeInMilliseconds * 1000);
+        BS->Stall(TimeInMilliseconds * 1000);
     }
 
-    uefi_call_wrapper(BS->CloseEvent, 1, StallEvent);
+    BS->CloseEvent(StallEvent);
 }
 
 
@@ -929,10 +929,7 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
 
     EFI_RNG_PROTOCOL *RNG = NULL;
     EFI_GUID gEfiRngProtocolGuid = EFI_RNG_PROTOCOL_GUID;
-    uefi_call_wrapper(BS->LocateProtocol, 3,
-                      &gEfiRngProtocolGuid,
-                      NULL,
-                      (VOID **)&RNG);
+    BS->LocateProtocol(&gEfiRngProtocolGuid, NULL, (VOID **)&RNG);
 
     if (EFI_SUCCESS != (
         Status = NewObjectBlt(Position.X,
@@ -1007,7 +1004,7 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
         FB->FlushPartial(FB, Position.X, Position.Y, Position.X, Position.Y, Size.Width, Size.Height);
 
         /* 25 ms delay between shifts */
-        uefi_call_wrapper(BS->Stall, 1, 25000);
+        BS->Stall(25000);
     }
 
     Status = EFI_SUCCESS;

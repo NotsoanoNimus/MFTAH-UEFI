@@ -47,19 +47,17 @@ LoadImage(IN LOADER_CONTEXT *Context)
     }
 
     /* Next, find the target image to chainload and load it to another segment of reserved memory. */
-    Status = uefi_call_wrapper(BS->LocateDevicePath, 3,
-                               &gEfiSimpleFileSystemProtocolGuid,
-                               (VOID **)&RamdiskDevicePath,
-                               &RamdiskDeviceHandle);
+    Status = BS->LocateDevicePath(&gEfiSimpleFileSystemProtocolGuid,
+                                  (VOID **)&RamdiskDevicePath,
+                                  &RamdiskDeviceHandle);
 
     if (EFI_ERROR(Status)) {
         /* Try an alternative, iterative method. */
-        Status = uefi_call_wrapper(BS->LocateHandleBuffer, 5,
-                                   ByProtocol,
-                                   &gEfiSimpleFileSystemProtocolGuid,
-                                   NULL,
-                                   &HandlesCount,
-                                   &Handles);
+        Status = BS->LocateHandleBuffer(ByProtocol,
+                                        &gEfiSimpleFileSystemProtocolGuid,
+                                        NULL,
+                                        &HandlesCount,
+                                        &Handles);
         if (EFI_ERROR(Status) || NULL == Handles || 0 == HandlesCount) {
             PANIC("Failed to retrieve a list of SFS handles to iterate.");
         }
@@ -89,10 +87,9 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
         /* Try to convert the handle to an SFS instance. */
         RamdiskDevicePath = DevicePathFromHandle(RamdiskDeviceHandle);
-        Status = uefi_call_wrapper(BS->LocateDevicePath, 3,
-                                   &gEfiSimpleFileSystemProtocolGuid,
-                                   (VOID **)&RamdiskDevicePath,
-                                   &RamdiskDeviceHandle);
+        Status = BS->LocateDevicePath(&gEfiSimpleFileSystemProtocolGuid,
+                                      (VOID **)&RamdiskDevicePath,
+                                      &RamdiskDeviceHandle);
 
         if (EFI_ERROR(Status)) {
             PANIC("Could not locate an SFS handle for the loaded ramdisk.");

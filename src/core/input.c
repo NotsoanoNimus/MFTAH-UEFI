@@ -19,58 +19,54 @@ ReadKey(OUT EFI_KEY_DATA *KeyData,
 
     if (TimeoutMilliseconds > 0) {
         /* Create a timeout event. */
-        Status = uefi_call_wrapper(BS->CreateEvent, 5,
-                                   EVT_TIMER,
-                                   TPL_NOTIFY,
-                                   NULL,
-                                   NULL,
-                                   &InputEvents[1]);
+        Status = BS->CreateEvent(EVT_TIMER,
+                                 TPL_NOTIFY,
+                                 NULL,
+                                 NULL,
+                                 &InputEvents[1]);
         if (EFI_ERROR(Status)) {
             EFI_DANGERLN("Failed to create input timeout event (%u).", Status);
             return Status;
         }
 
-        Status = uefi_call_wrapper(BS->SetTimer, 3,
-                                   InputEvents[1],
-                                   TimerRelative,
-                                   EFI_100NS_TO_MILLISECONDS(TimeoutMilliseconds));
+        Status = BS->SetTimer(InputEvents[1],
+                              TimerRelative,
+                              EFI_MILLISECONDS_TO_100NS(TimeoutMilliseconds));
         if (EFI_ERROR(Status)) {
-            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            BS->CloseEvent(InputEvents[1]);
             EFI_DANGERLN("Failed to start input timeout timer (%u).", Status);
             return Status;
         }
     }
 
     if (NULL == STIEP) {
-        Status = uefi_call_wrapper(BS->LocateProtocol, 3,
-                                   &gEfiSimpleTextInputExProtocolGuid,
-                                   NULL,
-                                   (VOID **)&STIEP);
+        Status = BS->LocateProtocol(&gEfiSimpleTextInputExProtocolGuid,
+                                    NULL,
+                                    (VOID **)&STIEP);
         if (EFI_ERROR(Status) || NULL == STIEP) goto ReadKey__Fallback;
     }
 
     /* Call both resets here regardless of which is used. */
-    uefi_call_wrapper(STIEP->Reset, 2, STIEP, FALSE);
-    uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
+    STIEP->Reset(STIEP, FALSE);
+    ST->ConIn->Reset(ST->ConIn, FALSE);
 
     do {
         InputEvents[0] = STIEP->WaitForKeyEx;
 
-        Status = uefi_call_wrapper(BS->WaitForEvent, 3,
-                                   (TimeoutMilliseconds > 0 ? 2 : 1),
-                                   InputEvents,
-                                   &FiredEventIndex);
+        Status = BS->WaitForEvent((TimeoutMilliseconds > 0 ? 2 : 1),
+                                  InputEvents,
+                                  &FiredEventIndex);
         if (EFI_ERROR(Status)) {
             goto ReadKey__Fallback;
         }
 
         if (1 == FiredEventIndex && TimeoutMilliseconds > 0) {
             /* The input event timed out. */
-            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            BS->CloseEvent(InputEvents[1]);
             return EFI_TIMEOUT;
         }
 
-        Status = uefi_call_wrapper(STIEP->ReadKeyStrokeEx, 2, STIEP, KeyData);
+        Status = STIEP->ReadKeyStrokeEx(STIEP, KeyData);
 
         if (EFI_NOT_READY == Status) {
             /* No keystroke data is available. Move on. */
@@ -82,20 +78,19 @@ ReadKey(OUT EFI_KEY_DATA *KeyData,
         break;
     } while (TRUE);
 
-    uefi_call_wrapper(STIEP->Reset, 2, STIEP, FALSE);
+    STIEP->Reset(STIEP, FALSE);
     goto ReadKey__Success;
 
 ReadKey__Fallback:
     SetMem(KeyData, sizeof(EFI_KEY_DATA), 0x00);
-    uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
+    ST->ConIn->Reset(ST->ConIn, FALSE);
 
     while (TRUE) {
         InputEvents[0] = ST->ConIn->WaitForKey;
 
-        Status = uefi_call_wrapper(BS->WaitForEvent, 3,
-                                  (TimeoutMilliseconds > 0 ? 2 : 1),
-                                  InputEvents,
-                                  &FiredEventIndex);
+        Status = BS->WaitForEvent((TimeoutMilliseconds > 0 ? 2 : 1),
+                                   InputEvents,
+                                   &FiredEventIndex);
         if (EFI_ERROR(Status)) {
             EFI_DANGERLN("Error awaiting fallback `WaitForKey` event (%u).", Status);
             return Status;
@@ -103,17 +98,17 @@ ReadKey__Fallback:
 
         if (1 == FiredEventIndex && TimeoutMilliseconds > 0) {
             /* The input event timed out. */
-            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            BS->CloseEvent(InputEvents[1]);
             return EFI_TIMEOUT;
         }
 
-        Status = uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &(KeyData->Key));
+        Status = ST->ConIn->ReadKeyStroke(ST->ConIn, &(KeyData->Key));
 
         if (EFI_NOT_READY == Status) {
             /* No keystroke data is available. Move on. */
             continue;
         } else if (EFI_ERROR(Status)) {
-            uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+            BS->CloseEvent(InputEvents[1]);
             EFI_DANGERLN("Call to fallback `ReadKeyStroke` returned error code %u.", Status);
             return Status;
         }
@@ -123,11 +118,11 @@ ReadKey__Fallback:
 
     /* Indicate that the fallback method was used to gather input. */
     KeyData->KeyState.KeyShiftState = READKEY_FALLBACK_INDICATOR;
-    uefi_call_wrapper(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
+    ST->ConIn->Reset(ST->ConIn, FALSE);
 
 ReadKey__Success:
     if (TimeoutMilliseconds > 0 && 0 != InputEvents[1]) {
-        uefi_call_wrapper(BS->CloseEvent, 1, InputEvents[1]);
+        BS->CloseEvent(InputEvents[1]);
     }
 
     return EFI_SUCCESS;
@@ -148,7 +143,7 @@ ReadChar16KeyboardInput(IN CONST CHAR16 *Prompt,
     UINTN KeyEvent;
     UINT8 InputLength = 0;
 
-    ERRCHECK_UEFI(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
+    ERRCHECK(ST->ConIn->Reset(ST->ConIn, FALSE));
     SetMem(InputBuffer, sizeof(CHAR16) * (MaxLength + 1), 0);
 
     do {
@@ -164,9 +159,9 @@ ReadChar16KeyboardInput(IN CONST CHAR16 *Prompt,
             PrintHook(L" ");
         }
 
-        ERRCHECK_UEFI(BS->WaitForEvent, 3, 1, &(ST->ConIn->WaitForKey), &KeyEvent);
+        ERRCHECK(BS->WaitForEvent(1, &(ST->ConIn->WaitForKey), &KeyEvent));
 
-        Status = uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &InputKey);
+        Status = ST->ConIn->ReadKeyStroke(ST->ConIn, &InputKey);
         if (EFI_NOT_READY == Status) {
             /* No keystroke data is available. Move on. */
             continue;
@@ -179,7 +174,7 @@ ReadChar16KeyboardInput(IN CONST CHAR16 *Prompt,
             return Status;
         }
 
-        ERRCHECK_UEFI(ST->ConIn->Reset, 2, ST->ConIn, FALSE);
+        ERRCHECK(ST->ConIn->Reset(ST->ConIn, FALSE));
 
         if (L'\x0A' == InputKey.UnicodeChar || L'\x0D' == InputKey.UnicodeChar) {
             break;

@@ -15,13 +15,12 @@ LoadImage(IN LOADER_CONTEXT *Context)
 
     /* This is relatively easy, just run the memory location in the context
         through LoadImage and StartImage Boot Services methods. */
-    Status = uefi_call_wrapper(BS->LoadImage, 6,
-                               FALSE,
-                               ENTRY_HANDLE,
-                               Context->LoadedImageDevicePath,
-                               (VOID *)Context->LoadedImageBase,
-                               Context->LoadedImageSize,
-                               &LoadedImageHandle);
+    Status = BS->LoadImage(FALSE,
+                           ENTRY_HANDLE,
+                           Context->LoadedImageDevicePath,
+                           (VOID *)Context->LoadedImageBase,
+                           Context->LoadedImageSize,
+                           &LoadedImageHandle);
     if (EFI_ERROR(Status) || NULL == LoadedImageHandle) {
         // TODO: More granular panics here so the user knows wth is going on.
         // TODO: Use displays PANIC instead
@@ -60,10 +59,7 @@ LoadImage__NoCmdLine:
     LoaderDestroyContext(Context);
 
     /* We should not ever come back from here. */
-    Status = uefi_call_wrapper(BS->StartImage, 3,
-                               LoadedImageHandle,
-                               NULL,
-                               NULL);
+    Status = BS->StartImage(LoadedImageHandle, NULL, NULL);
 
     // TODO: Should really just fall back to the `native` mode here and call `Print`.
     if (EFI_INVALID_PARAMETER == Status) {

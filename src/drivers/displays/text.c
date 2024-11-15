@@ -550,13 +550,12 @@ TextInit(IN SIMPLE_DISPLAY *This,
     if (FALSE == Configuration->AutoMode) goto TextInit__SkipMode;
 
 TextInit__QueryMode:
-    Status = uefi_call_wrapper(STOP->QueryMode, 4,
-                               STOP,
-                               (NULL == STOP->Mode ? 0 : STOP->Mode->Mode),
-                               &Columns,
-                               &Rows);
+    Status = STOP->QueryMode(STOP,
+                             (NULL == STOP->Mode ? 0 : STOP->Mode->Mode),
+                             &Columns,
+                             &Rows);
     if (EFI_NOT_STARTED == Status) {
-        ERRCHECK_UEFI(STOP->SetMode, 2, STOP, 0);
+        ERRCHECK(STOP->SetMode(STOP, 0));
         goto TextInit__QueryMode;
     } else if (EFI_ERROR(Status)) {
         EFI_DANGERLN("Failure querying console video modes.");
@@ -572,11 +571,7 @@ TextInit__QueryMode:
     PRINTLN("STOP:  Inspecting %u console modes...", NumberOfModes);
 
     for (UINTN i = 0; i < NumberOfModes; ++i) {
-        Status = uefi_call_wrapper(STOP->QueryMode, 4,
-                                   STOP,
-                                   i,
-                                   &Columns,
-                                   &Rows);
+        Status = STOP->QueryMode(STOP, i, &Columns, &Rows);
         if (EFI_ERROR(Status)) {
             EFI_WARNINGLN("NOTICE: STOP:  Error while querying mode #%u (Code %u).", i, Status);
             continue;
@@ -595,18 +590,17 @@ TextInit__QueryMode:
     PRINTLN("Finished enumerating console modes.");
 
     PRINTLN("Setting console mode #%u...", BestMode);
-    Status = uefi_call_wrapper(STOP->SetMode, 2, STOP, BestMode);
+    Status = STOP->SetMode(STOP, BestMode);
     if (EFI_ERROR(Status)) {
         EFI_WARNINGLN("Failed to set the console mode. Keeping the native resolution.");
-        ERRCHECK_UEFI(STOP->SetMode, 2, STOP, NativeMode);
+        ERRCHECK(STOP->SetMode(STOP, NativeMode));
     }
 
 TextInit__SkipMode:
-    Status = uefi_call_wrapper(STOP->QueryMode, 4,
-                               STOP,
-                               STOP->Mode->Mode,
-                               &ModeColumns,
-                               &ModeRows);
+    Status = STOP->QueryMode(STOP,
+                             STOP->Mode->Mode,
+                             &ModeColumns,
+                             &ModeRows);
     if (0 == ModeRows || 0 == ModeColumns) {
         EFI_DANGERLN(
             "ERROR: STOP:  Current mode returned 0 rows or 0 columns (%u/%u:%u).",
@@ -703,7 +697,7 @@ TextPanic(IN CONST SIMPLE_DISPLAY *This,
           IN BOOLEAN IsShutdown,
           IN UINTN ShutdownTimer)
 {
-    uefi_call_wrapper(STOP->SetAttribute, 2, STOP, MFTAH_COLOR_PANIC);
+    STOP->SetAttribute(STOP, MFTAH_COLOR_PANIC);
     CONST CHAR *PanicPrefix = "PANIC: ";
     UINTN MessageLength = AsciiStrLen(Message);
 
@@ -937,7 +931,7 @@ TPrint(IN CHAR8 *Str,
 
     EFI_STATUS Status = EFI_SUCCESS;
 
-    Status = uefi_call_wrapper(STOP->SetCursorPosition, 3, STOP, Column, Row);
+    Status = STOP->SetCursorPosition(STOP, Column, Row);
     if (EFI_ERROR(Status)) return;
 
     CHAR8 *CopiedStr = (CHAR8 *)

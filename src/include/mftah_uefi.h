@@ -100,12 +100,10 @@
     if (EFI_ERROR(Status)) { return Status; } \
     }
 
-/* Same as above, except automatically uses the uefi_call_wrapper construct. */
-#define ERRCHECK_UEFI(x,y,...) \
-    ERRCHECK(uefi_call_wrapper(x, y, ##__VA_ARGS__))
-
 /* Quick conversion of UEFI time slices (100ns) to milliseconds. */
-#define EFI_100NS_TO_MILLISECONDS(x)     (x * 10 * 1000)
+#define EFI_MILLISECONDS_TO_100NS(x)     (x * 10 * 1000)
+/* Convert seconds to microseconds. */
+#define EFI_SECONDS_TO_MICROSECONDS(x)     (x * 1000 * 1000)
 
 /* Macro for setting console colors quickly. */
 #define EFI_COLOR(x) \
@@ -166,7 +164,7 @@ static CHAR16 s_panic_buffer[512] = {'P', 'A', 'N', 'I', 'C', '!', ' ', 0};
 static unsigned int s_panic_buffer_cursor = 7;
 
 #define HALT \
-    while (TRUE) uefi_call_wrapper(BS->Stall, 1, 60000000);
+    while (TRUE) BS->Stall(EFI_SECONDS_TO_MICROSECONDS(60));
 
 #define PANIC(x) \
     { \

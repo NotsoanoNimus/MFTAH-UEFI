@@ -80,12 +80,12 @@ InstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
     }
 
     UINTN NewXsdtLength = xsdt->Length + sizeof(EFI_ACPI_DESCRIPTION_HEADER *);
-    uefi_call_wrapper(BS->AllocatePool, 3, EfiACPIMemoryNVS, NewXsdtLength, &xsdt);
+    BS->AllocatePool(EfiACPIMemoryNVS, NewXsdtLength, &xsdt);
     if (NULL == xsdt) return EFI_OUT_OF_RESOURCES;
     CopyMem(xsdt, (VOID *)(mRsdp->XsdtAddress), NewXsdtLength - sizeof(EFI_ACPI_DESCRIPTION_HEADER *));
 
     UINTN NewRsdtLength = rsdt->Length + sizeof(UINT32);
-    uefi_call_wrapper(BS->AllocatePool, 3, EfiACPIMemoryNVS, NewRsdtLength, &rsdt);
+    BS->AllocatePool(EfiACPIMemoryNVS, NewRsdtLength, &rsdt);
     if (NULL == rsdt) return EFI_OUT_OF_RESOURCES;
     CopyMem(rsdt, (VOID *)(mRsdp->RsdtAddress), NewRsdtLength - sizeof(UINT32));
 
@@ -104,10 +104,11 @@ InstallTable(IN EFI_ACPI_TABLE_PROTOCOL *This,
     }
 
     /* Alright, we're good. Insert the handle at the end of the table. */
-    ERRCHECK_UEFI(BS->AllocatePool, 3,
-                  EfiACPIMemoryNVS,
-                  AcpiTableBufferSize,
-                  (VOID **)&NewHandle);
+    ERRCHECK(
+        BS->AllocatePool(EfiACPIMemoryNVS,
+                         AcpiTableBufferSize,
+                         (VOID **)&NewHandle)
+    );
     if (NULL == NewHandle) {
         EFI_DANGERLN("ERROR: ACPI: Out of resources!");
         FreePool(xsdt);
@@ -263,12 +264,10 @@ AcpiProtocolCheck(VOID)
     EFI_STATUS Status = EFI_SUCCESS;
 
     /* Attempt to locate the EFI_ACPI_TABLE_PROTOCOL from the firmware. */
-    ERRCHECK_UEFI(
-        BS->LocateProtocol,
-        3,
-        &gEfiAcpiTableProtocolGuid,
-        NULL,
-        (VOID **)&mAcpiTableProtocol
+    ERRCHECK(
+        BS->LocateProtocol(&gEfiAcpiTableProtocolGuid,
+                           NULL,
+                           (VOID **)&mAcpiTableProtocol)
     );
 
     return (NULL == mAcpiTableProtocol)

@@ -23,14 +23,15 @@ FlushFramebufferPartial(IN CONST EFI_SIMPLE_FRAMEBUFFER_PROTOCOL *This,
 {
     if (NULL == This) return;
 
-    uefi_call_wrapper(This->GOP->Blt, 10,
-                      This->GOP,
-                      (VOID *)This->BLT->Buffer,
-                      EfiBltBufferToVideo,
-                      X, Y,
-                      ToX, ToY,
-                      Width, Height,
-                      This->BLT->Pitch);
+    This->GOP->Blt(
+        This->GOP,
+        (VOID *)This->BLT->Buffer,
+        EfiBltBufferToVideo,
+        X, Y,
+        ToX, ToY,
+        Width, Height,
+        This->BLT->Pitch
+    );
 }
 
 

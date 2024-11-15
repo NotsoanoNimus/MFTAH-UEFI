@@ -123,10 +123,9 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
 
     if (TRUE == HandleIsLoadedImage) {
         /* Open Loaded Image protocol handle. */
-        Status = uefi_call_wrapper(BS->HandleProtocol, 3,
-                                   BaseImageHandle,
-                                   &gEfiLoadedImageProtocolGuid,
-                                   (VOID **)&LoadedImage);
+        Status = BS->HandleProtocol(BaseImageHandle,
+                                    &gEfiLoadedImageProtocolGuid,
+                                    (VOID **)&LoadedImage);
         if (EFI_ERROR(Status)) {
             EFI_DANGERLN("Error locating Loaded Image Protocol handle (%u).", Status);
             return Status;
@@ -136,34 +135,30 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
     }
 
     /* Use the device handle from the image to open the relative volume. */
-    Status = uefi_call_wrapper(BS->HandleProtocol, 3,
-                               BaseImageHandle,
-                               &gEfiSimpleFileSystemProtocolGuid,
-                               (VOID **)&ImageIoHandle);
+    Status = BS->HandleProtocol(BaseImageHandle,
+                                &gEfiSimpleFileSystemProtocolGuid,
+                                (VOID **)&ImageIoHandle);
     if (EFI_ERROR(Status)) {
         EFI_DANGERLN("Error initializing SFS protocol handle (%u).", Status);
         return Status;
     }
 
     /* Open the volume directly. */
-    Status = uefi_call_wrapper(ImageIoHandle->OpenVolume, 2,
-                               ImageIoHandle,
-                               &VolumeHandle);
+    Status = ImageIoHandle->OpenVolume(ImageIoHandle, &VolumeHandle);
     if (EFI_ERROR(Status)) {
         EFI_DANGERLN("Error opening volume handle (%u).", Status);
         return Status;
     }
 
     /* Now try to load the file. */
-    Status = uefi_call_wrapper(VolumeHandle->Open, 5,
-                               VolumeHandle,
-                               &LoadedFileHandle,
-                               Filename,
-                               EFI_FILE_MODE_READ,
-                               (EFI_FILE_READ_ONLY
-                                | EFI_FILE_ARCHIVE
-                                | EFI_FILE_HIDDEN
-                                | EFI_FILE_SYSTEM));
+    Status = VolumeHandle->Open(VolumeHandle,
+                                &LoadedFileHandle,
+                                Filename,
+                                EFI_FILE_MODE_READ,
+                                (EFI_FILE_READ_ONLY
+                                 | EFI_FILE_ARCHIVE
+                                 | EFI_FILE_HIDDEN
+                                 | EFI_FILE_SYSTEM));
     if (EFI_ERROR(Status)) {
         EFI_DANGERLN("Error opening file handle (%u).", Status);
         return Status;
@@ -215,13 +210,9 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
         /* The loop should never repeat with a 0-valued ChunkReadSize. */
         if (0 == ChunkReadSize) return EFI_END_OF_FILE;
 
-        Status = uefi_call_wrapper(
-            LoadedFileHandle->Read, 3,
-            LoadedFileHandle,
-            &ChunkReadSize,
-            (VOID *)((EFI_PHYSICAL_ADDRESS)Buffer + i)
-        );
-
+        Status = LoadedFileHandle->Read(LoadedFileHandle,
+                                        &ChunkReadSize,
+                                        (VOID *)((EFI_PHYSICAL_ADDRESS)Buffer + i));
         if (EFI_ERROR(Status)) {
             FreePool(Buffer);
             goto ReadFile__clean_up_and_exit;
@@ -244,8 +235,8 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
 
     /* Clean up after ourselves. We're not really concerned if these fail. */
 ReadFile__clean_up_and_exit:
-    uefi_call_wrapper(LoadedFileHandle->Close, 1, LoadedFileHandle);
-    uefi_call_wrapper(VolumeHandle->Close, 1, VolumeHandle);
+    LoadedFileHandle->Close(LoadedFileHandle);
+    VolumeHandle->Close(VolumeHandle);
 
     return Status;
 }
@@ -266,14 +257,12 @@ GetFileSystemHandleByVolumeName(IN CHAR16 *VolumeName,
     UINTN HandleCount = 0;
     BOOLEAN GotHandle = FALSE;
 
-    ERRCHECK_UEFI(
-        BS->LocateHandleBuffer,
-        5,
-        ByProtocol,
-        &gEfiSimpleFileSystemProtocolGuid,
-        NULL,
-        &HandleCount,
-        &Handles
+    ERRCHECK(
+        BS->LocateHandleBuffer(ByProtocol,
+                               &gEfiSimpleFileSystemProtocolGuid,
+                               NULL,
+                               &HandleCount,
+                               &Handles)
     );
 
     /* Iterate the returned set of handles. */
@@ -281,20 +270,13 @@ GetFileSystemHandleByVolumeName(IN CHAR16 *VolumeName,
         EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
         EFI_FILE_PROTOCOL *root = NULL;
 
-        ERRCHECK_UEFI(
-            BS->HandleProtocol,
-            3,
-            Handles[i],
-            &gEfiSimpleFileSystemProtocolGuid,
-            (VOID **)&fs
+        ERRCHECK(
+            BS->HandleProtocol(Handles[i],
+                               &gEfiSimpleFileSystemProtocolGuid,
+                               (VOID **)&fs)
         );
 
-        ERRCHECK_UEFI(
-            fs->OpenVolume,
-            2,
-            fs,
-            &root
-        );
+        ERRCHECK(fs->OpenVolume(fs, &root));
 
         EFI_FILE_SYSTEM_VOLUME_LABEL_INFO *VolumeInfo = LibFileSystemVolumeLabelInfo(root);
         if (NULL == VolumeInfo) continue;
@@ -347,14 +329,7 @@ VOID
 EFIAPI
 Shutdown(IN CONST EFI_STATUS Reason)
 {
-    EFI_STATUS Status = uefi_call_wrapper(
-        RT->ResetSystem, 4,
-        EfiResetShutdown,
-        Reason,
-        0,
-        NULL
-    );
-
+    EFI_STATUS Status = RT->ResetSystem(EfiResetShutdown, Reason, 0, NULL);
     PANIC("System execution suspended. Please shutdown or reboot manually.");
 }
 
@@ -363,14 +338,7 @@ VOID
 EFIAPI
 Reboot(IN CONST EFI_STATUS Reason)
 {
-    EFI_STATUS Status = uefi_call_wrapper(
-        RT->ResetSystem, 4,
-        EfiResetCold,
-        Reason,
-        0,
-        NULL
-    );
-
+    EFI_STATUS Status = RT->ResetSystem(EfiResetCold, Reason, 0, NULL);
     PANIC("System execution suspended, but failed to restart automatically. Please reboot manually.");
 }
 

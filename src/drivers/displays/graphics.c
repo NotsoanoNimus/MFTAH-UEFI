@@ -5,13 +5,6 @@
 
 
 
-CHAR8 *NormalTimeoutStr = "Choosing default in %u seconds.";
-CHAR8 *MaxTimeoutStr = "Global timeout in %u seconds.";
-CHAR8 *NoTimeoutStr = "No timeout values are set.";
-CHAR8 *DefaultTimeoutStr = "Choosing default menu option...";
-CHAR8 *MaxTimeoutExceededtStr = "Maximum timeout exceeded! Shutting down!";
-
-
 typedef
 enum {
     OverlayHidden = 0,
@@ -47,6 +40,10 @@ STATIC GRAPHICS_CONTEXT *GraphicsContext = NULL;
 STATIC BOUNDED_SHAPE *LoadingIconUnderlayBlt,
                      *ProgressBlt,
                      *MftahKeyPromptBlt;
+
+/* Used for the LoadingAnimationLoop method. */
+STATIC VOLATILE FB_VERTEX *Vertices = NULL;
+STATIC UINTN VerticesCount = 0;
 
 
 
@@ -639,6 +636,7 @@ GraphicsDestroy(IN CONST SIMPLE_DISPLAY *This)
     FB = NULL;
 
     FreePool(This->MENU);
+    FreePool(Vertices);
 
     return EFI_SUCCESS;
 }
@@ -914,7 +912,6 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
     EFI_STATUS Status = EFI_SUCCESS;
     BOUNDED_SHAPE *s = NULL;
     FB_VERTEX Origin = {0};
-    VOLATILE FB_VERTEX *Vertices = NULL;
 
     /* Short-handing these properties... */
     FB_VERTEX Position = Underlay->Position;
@@ -934,13 +931,18 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
     )) goto LoadingAnimation__ExitError;
 
     /* Initialize vertices with random locations inside of `Size` (16 <= Count <= 128). */
-    UINTN VerticesCount = MAX(16, MIN(128, (Size.Width * Size.Height) / 1000));
     INT8 wiggleX = 0, wiggleY = 0;
 
-    Vertices = (FB_VERTEX *)AllocateZeroPool(sizeof(FB_VERTEX) * VerticesCount);
+    /* Vertices are only initialized ONCE. This allows pauses between stalls and other handoffs
+        of the loading animation to pick back up in the same place it left off throughout the
+        life of the application. The list of vertices is freed when the GUI object is destroyed. */
     if (NULL == Vertices) {
-        Status = EFI_OUT_OF_RESOURCES;
-        goto LoadingAnimation__ExitError;
+        VerticesCount = MAX(16, MIN(128, (Size.Width * Size.Height) / 1000));
+        Vertices = (FB_VERTEX *)AllocateZeroPool(sizeof(FB_VERTEX) * VerticesCount);
+        if (NULL == Vertices) {
+            Status = EFI_OUT_OF_RESOURCES;
+            goto LoadingAnimation__ExitError;
+        }
     }
 
     for (UINTN i = 0; i < VerticesCount; ++i) {

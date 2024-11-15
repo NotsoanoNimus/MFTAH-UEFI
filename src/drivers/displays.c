@@ -2,6 +2,13 @@
 
 
 
+CHAR8 *NormalTimeoutStr = "Choosing default in %u seconds.";
+CHAR8 *MaxTimeoutStr = "Global timeout in %u seconds.";
+CHAR8 *NoTimeoutStr = "No timeout values are set.";
+CHAR8 *DefaultTimeoutStr = "Choosing default menu option...";
+CHAR8 *MaxTimeoutExceededtStr = "Maximum timeout exceeded! Shutting down!";
+
+
 SIMPLE_DISPLAY *DISPLAY = NULL;
 
 

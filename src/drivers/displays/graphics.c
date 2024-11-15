@@ -943,19 +943,19 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
             Status = EFI_OUT_OF_RESOURCES;
             goto LoadingAnimation__ExitError;
         }
-    }
 
-    for (UINTN i = 0; i < VerticesCount; ++i) {
-        if (NULL == RNG || EFI_SUCCESS != RNG->GetRNG(RNG, NULL, sizeof(UINTN), &(Vertices[i].X))) {
-            Vertices[i].X = i;
-        } else {
-            Vertices[i].X %= Size.Width;
-        }
+        for (UINTN i = 0; i < VerticesCount; ++i) {
+            if (NULL == RNG || EFI_SUCCESS != RNG->GetRNG(RNG, NULL, sizeof(UINTN), &(Vertices[i].X))) {
+                Vertices[i].X = i;
+            } else {
+                Vertices[i].X %= Size.Width;
+            }
 
-        if (NULL == RNG || EFI_SUCCESS != RNG->GetRNG(RNG, NULL, sizeof(UINTN), &(Vertices[i].Y))) {
-            Vertices[i].Y = i;
-        } else {
-            Vertices[i].Y %= Size.Height;
+            if (NULL == RNG || EFI_SUCCESS != RNG->GetRNG(RNG, NULL, sizeof(UINTN), &(Vertices[i].Y))) {
+                Vertices[i].Y = i;
+            } else {
+                Vertices[i].Y %= Size.Height;
+            }
         }
     }
 
@@ -1006,7 +1006,6 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
 
 LoadingAnimation__ExitError:
     BltDestroy(s);
-    FreePool(Vertices);
     return Status;
 }
 

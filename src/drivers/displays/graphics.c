@@ -211,11 +211,11 @@ DrawMenu(IN MENU_STATE *m)
 
             /* Draw the BLT buffer into the higher/main BLT buffer, row by row. */
             FB->BltToBlt(FB,
-                             FB->BLT,
-                             Renderables[i],
-                             Renderables[i]->Position,
-                             Origin,
-                             Renderables[i]->Dimensions);
+                         FB->BLT,
+                         Renderables[i],
+                         Renderables[i]->Position,
+                         Origin,
+                         Renderables[i]->Dimensions);
         }
     }
 
@@ -415,10 +415,10 @@ TimerTick(EFI_EVENT Event,
         }
 
         if (MaxTimeoutActive) {
-                AsciiSPrint(GraphicsContext->MaxTimeoutText,
-                            128,
-                            MaxTimeoutStr,
-                            (GraphicsContext->MaxTimeout - m->MillisecondsElapsed) / 1000);
+            AsciiSPrint(GraphicsContext->MaxTimeoutText,
+                        128,
+                        MaxTimeoutStr,
+                        (GraphicsContext->MaxTimeout - m->MillisecondsElapsed) / 1000);
         }
 
         /* Draw the base state of the timeouts panel. */
@@ -676,7 +676,7 @@ GraphicsPanic(IN CONST SIMPLE_DISPLAY *This,
 
     if (0 == ShutdownTimer) {
         /* Default to 3 seconds. */
-        BS->Stall(3000000);
+        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
     } else {
         BS->Stall(ShutdownTimer);
     }
@@ -829,9 +829,7 @@ GraphicsInputPopup(IN CONST SIMPLE_DISPLAY *This,
     FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, PromptRect, PromptRectTo, 0, FALSE, 1, CONFIG->Colors.Text.Background);
 
     /* Full BLT box border. */
-    FB_VERTEX Origin = {0};
-    FB_VERTEX FullBltEnd = { .X = MftahKeyPromptBlt->Dimensions.Width-1, .Y = MftahKeyPromptBlt->Dimensions.Height-1 };
-    FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, Origin, FullBltEnd, 0, FALSE, 1, CONFIG->Colors.Title.Foreground);
+    BltDrawOutline(MftahKeyPromptBlt, CONFIG->Colors.Title.Foreground);
 
     /* Never exceed the width of the box when GPrint'ing. */
     UINTN StarsToPrintInBox = MIN(

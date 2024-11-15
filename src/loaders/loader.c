@@ -41,7 +41,93 @@ ProgressWrapper(IN CONST UINTN *Current,
 
 
 STATIC
-EFIAPI
+EFI_STATUS
+LoaderReadImageParts(IN LOADER_CONTEXT *Context,
+                     IN EFI_HANDLE TargetHandle,
+                     IN CHAR16 *PayloadPath)
+{
+    if (
+        NULL == Context
+        || NULL == TargetHandle
+        || NULL == PayloadPath
+        || 0 == StrLen(PayloadPath)
+    ) return EFI_INVALID_PARAMETER;
+
+    EFI_STATUS Status = EFI_SUCCESS;
+
+    UINTN CurrentPart = 0;
+    UINTN DiscoveredParts = 0;
+
+    UINTN ImagePartSizes[10] = {0};
+    UINTN TotalImageSize = 0;
+
+    UINTN PayloadPathLength = StrLen(PayloadPath);
+
+    /* Walk the payload fragments from .0 through and including .9. This breaks out wherever the
+        chain of fragments end (the first one not found). If the .0 fragment is not found, exits
+        with an EFI_NOT_FOUND error. */
+    do {
+        *((CHAR8 *)&(PayloadPath[PayloadPathLength - 1])) = ('0' + CurrentPart);
+
+        Status = FileSizeFromPath(PayloadPath,
+                                  TargetHandle,
+                                  (TargetHandle == ENTRY_HANDLE),
+                                  &(ImagePartSizes[CurrentPart]));
+        if (EFI_NOT_FOUND == Status) {
+            if (0 == CurrentPart) return EFI_NOT_FOUND;
+            else break;
+        } else if (EFI_ERROR(Status) || 0 == ImagePartSizes[CurrentPart]) return Status;
+
+        TotalImageSize += ImagePartSizes[CurrentPart];
+    } while (++CurrentPart < 10);
+
+    /* At this point, we've discovered up to (not including) `CurrentPart` parts. */
+    DiscoveredParts = CurrentPart;
+
+    /* Reserve the total size. */
+    Context->LoadedImageSize = TotalImageSize;
+
+    Status = BS->AllocatePool(EfiReservedMemoryType, TotalImageSize, (VOID **)&(Context->LoadedImageBase));
+    if (EFI_ERROR(Status)) return Status;
+    else if ((EFI_PHYSICAL_ADDRESS)NULL == Context->LoadedImageBase) return EFI_OUT_OF_RESOURCES;
+
+    /* Iterate the set of parts and load them into a consecutive block of memory. */
+    UINT8 *LoadAddress = (UINT8 *)Context->LoadedImageBase;
+
+    for (CurrentPart = 0; CurrentPart < DiscoveredParts; ++CurrentPart) {
+        *((CHAR8 *)&(PayloadPath[PayloadPathLength - 1])) = ('0' + CurrentPart);
+
+        CHAR8 *CurrentPath = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (128 + 1));
+        if (NULL == CurrentPath) return EFI_OUT_OF_RESOURCES;
+
+        AsciiSPrint(CurrentPath, 128, "Reading Part %u...", (CurrentPart + 1));
+        ProgressStatusMessage = CurrentPath;
+
+        DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+
+        Status = ReadFile(TargetHandle,
+                          PayloadPath,
+                          0U,
+                          &LoadAddress,
+                          &(ImagePartSizes[CurrentPart]),
+                          (TargetHandle == ENTRY_HANDLE),
+                          EfiReservedMemoryType,
+                          0,
+                          0,
+                          ProgressWrapper);
+        if (EFI_ERROR(Status)) return Status;
+
+        LoadAddress = (UINT8 *)((EFI_PHYSICAL_ADDRESS)LoadAddress + ImagePartSizes[CurrentPart]);
+
+        FreePool(CurrentPath);
+        ProgressStatusMessage = NULL;
+    }
+
+    return EFI_SUCCESS;
+}
+
+
+STATIC
 EFI_STATUS
 LoaderReadImage(IN LOADER_CONTEXT *Context)
 {
@@ -109,16 +195,22 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
         will cause `ReadFile` to return errors. */
     for (CHAR16 *s = PayloadPath; *s; ++s) if (L'/' == *s) *s = L'\\';
 
-    ERRCHECK(ReadFile(TargetHandle,
-                      PayloadPath,
-                      0U,
-                      (UINT8 **)&(Context->LoadedImageBase),
-                      &(Context->LoadedImageSize),
-                      (TargetHandle == ENTRY_HANDLE),
-                      EfiReservedMemoryType,   /* always mark payload as reserved in e820/memmap */
-                      RAM_DISK_BLOCK_SIZE,
-                      (Context->Chain->IsMFTAH ? sizeof(mftah_payload_header_t) : 0),
-                      ProgressWrapper));
+    if (TRUE == Context->Chain->PayloadParts) {
+        ERRCHECK(LoaderReadImageParts(Context, TargetHandle, PayloadPath));
+    } else {
+        Context->LoadedImageBase = 0;   /* set addr hint to NULL (so a new buffer is allocated) */
+        ERRCHECK(ReadFile(TargetHandle,
+                          PayloadPath,
+                          0U,
+                          (UINT8 **)&(Context->LoadedImageBase),
+                          &(Context->LoadedImageSize),
+                          (TargetHandle == ENTRY_HANDLE),
+                          EfiReservedMemoryType,   /* always mark payload as reserved in e820/memmap */
+                          RAM_DISK_BLOCK_SIZE,
+                          (Context->Chain->IsMFTAH ? sizeof(mftah_payload_header_t) : 0),
+                          ProgressWrapper));
+    }
+
     FreePool(PayloadPath);
 
     /* Close out with a completed progress detail and a small stall. */
@@ -442,6 +534,80 @@ GetPassword__EnterKey:
 
 STATIC
 EFIAPI
+mftah_status_t
+SpawnMftahDecryptionWorkers(IN mftah_immutable_protocol_t Mftah,
+                            IN mftah_work_order_t *WorkOrder,
+                            IN immutable_ref_t Sha256Key,
+                            IN immutable_ref_t InitializationVector,
+                            IN mftah_progress_t *ProgressMeta OPTIONAL)
+{
+    // TODO: Branch based on threading enable flag.
+    EFI_STATUS Status = EFI_SUCCESS;
+    mftah_status_t MftahStatus = MFTAH_SUCCESS;
+    mftah_progress_t ThreadProgress = {0};
+    mftah_progress_t *ThreadProgressClone = NULL;
+    mftah_work_order_t *WorkOrderClone = NULL;
+
+    if (
+        NULL == Mftah
+        || NULL == WorkOrder
+        || NULL == Sha256Key
+        || NULL == InitializationVector
+    ) {
+        return MFTAH_INVALID_PARAMETER;
+    }
+
+    /* The library should never return a thread index higher than what is possible. */
+    if (WorkOrder->thread_index >= MFTAH_MAX_THREAD_COUNT) {
+        Status = EFI_ABORTED;
+        DISPLAY->Panic(DISPLAY, "Encountered an invalid thread index while decrypting.", TRUE, 10000000);
+    }
+
+    if (!WorkOrder->length) return MFTAH_SUCCESS;
+
+    /* Set up the progress hook. */
+    ThreadProgress.context = NULL;
+    ThreadProgress.hook = (FALSE != WorkOrder->suppress_progress)
+        ? NULL
+        : ProgressWrapper;
+        // : (IsThreadingEnabled() ? SaveThreadProgress : ProgressWrapper);
+
+    // if (!IsThreadingEnabled()) {
+        /* This will synchronously run the operation. Each progress message is tracked individually. */
+        CHAR8 *ProgressMessage = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (128 + 1));
+        AsciiSPrint(ProgressMessage, 128, "Decrypting Block %u...", (WorkOrder->thread_index + 1));
+
+        ProgressStatusMessage = ProgressMessage;
+
+        MftahStatus = MFTAH_CRYPT_HOOK_DEFAULT(Mftah,
+                                               WorkOrder,
+                                               Sha256Key,
+                                               InitializationVector,
+                                               &ThreadProgress);
+
+        FreePool(ProgressMessage);
+        ProgressStatusMessage = NULL;
+
+        return MftahStatus;
+    // }
+
+    return MFTAH_SUCCESS;
+}
+
+
+VOID
+MftahDecryptionSpin(IN UINT64 *QueuedBytes)
+{
+    // TODO: This will become easier to use when threading is figured out. For now, do nothing.
+    UINT64 Progress = 0;
+    UINT64 TotalProgress = *QueuedBytes;
+
+    return;
+}
+
+
+STATIC
+EFIAPI
 EFI_STATUS
 LoaderMftahDecrypt(IN LOADER_CONTEXT *Context)
 {
@@ -466,8 +632,8 @@ LoaderMftahDecrypt(IN LOADER_CONTEXT *Context)
                                          Context->MftahPayloadWrapper,
                                          Context->Chain->MFTAHKey,
                                          AsciiStrLen(Context->Chain->MFTAHKey),
-                                         MFTAH_CRYPT_HOOK_DEFAULT,   /* TODO Use threading? */
-                                         NULL);
+                                         SpawnMftahDecryptionWorkers,
+                                         MftahDecryptionSpin);
     if (MFTAH_ERROR(MftahStatus)) {
         /* TODO: Better reasons/error messages. */
         EFI_DANGERLN("Failed to decrypt the MFTAH payload object. Code '%u'.", MftahStatus);
@@ -526,26 +692,8 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
         Through this method, we're effectively just switching back to a simple text mode. */
     EFI_STATUS Status = EFI_SUCCESS;
 
-    CONFIG_CHAIN_BLOCK *chain = (CONFIG_CHAIN_BLOCK *)AllocateZeroPool(sizeof(CONFIG_CHAIN_BLOCK));
-    if (NULL == chain) {
-        Status = EFI_OUT_OF_RESOURCES;
-        DISPLAY->Panic(DISPLAY, "Failed to duplicate the loaded chain: out of resources!", TRUE, 10000000);
-    }
-
-    /* A DEEP clone is required, since all pointers will be freed. */
-    CopyMem(chain, CONFIG->Chains[SelectedChainIndex], sizeof(CONFIG_CHAIN_BLOCK));
-
-    CHAR8 *Name = (CHAR8 *)AllocateZeroPool(AsciiStrLen(chain->Name) + 1);
-    CopyMem(Name, chain->Name, AsciiStrLen(chain->Name));
-    chain->Name = Name;
-
-    CHAR8 *TargetPath = (CHAR8 *)AllocateZeroPool(AsciiStrLen(chain->TargetPath) + 1);
-    CopyMem(TargetPath, chain->TargetPath, AsciiStrLen(chain->TargetPath));
-    chain->TargetPath = TargetPath;
-
-    CHAR8 *PayloadPath = (CHAR8 *)AllocateZeroPool(AsciiStrLen(chain->PayloadPath) + 1);
-    CopyMem(PayloadPath, chain->PayloadPath, AsciiStrLen(chain->PayloadPath));
-    chain->PayloadPath = PayloadPath;
+    /* Making access of this variable more terse. */
+    CONFIG_CHAIN_BLOCK *chain = CONFIG->Chains[SelectedChainIndex];
 
     /* Set up the context object and send it to the right chain. */
     LOADER_CONTEXT *Context = (LOADER_CONTEXT *)AllocateZeroPool(sizeof(LOADER_CONTEXT));

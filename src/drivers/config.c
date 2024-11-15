@@ -1007,6 +1007,18 @@ DECL_HANDLER(payload)
     Configuration.Chains[Configuration.ChainsLength]->PayloadPath = payload;
     DPRINTLN("PAYLOAD ALLOCATED AND SET.");
 
+    UINTN PayloadNameLength = AsciiStrLen(payload);
+
+    /* Globbed (parts) path indicator. */
+    if (
+        PayloadNameLength > 2
+        && '.' == payload[PayloadNameLength - 2]
+        && '*' <= payload[PayloadNameLength - 1]
+    ) {
+        Configuration.Chains[Configuration.ChainsLength]->PayloadParts = TRUE;
+        DPRINTLN("PAYLOAD SHOULD BE LOADED IN PARTS.");
+    }
+
     return EFI_SUCCESS;
 }
 

@@ -40,6 +40,7 @@ typedef
 struct {
     CHAR8           *Name;
     CHAR8           *PayloadPath;
+    BOOLEAN         PayloadParts;
     CHAR8           *TargetPath;   /* Inner EFI to chainload (for MFTAH_DISK types). */
     CHAR8           *MFTAHKey;   /* Prefilled password (or filled by prompt). */
     CHAR8           *CmdLine;   /* Passed to loaded EFI images during LoadImage or given directly otherwise. */

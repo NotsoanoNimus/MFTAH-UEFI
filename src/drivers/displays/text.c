@@ -682,7 +682,9 @@ TextClearScreen(IN CONST SIMPLE_DISPLAY *This,
 
     /* Both clear the screen AND print an entire screen's worth of new-lines.
         This is because ClearScreen sometimes doesn't preserve background colors. */
+    STOP->SetAttribute(STOP, (UINT8)Color);
     STOP->ClearScreen(STOP);
+
     STOP->SetAttribute(STOP, (UINT8)Color);
 
     /* By manually setting the cursor to the origin and having prints overwrite
@@ -744,7 +746,7 @@ TextPrintProgress(IN CONST SIMPLE_DISPLAY *This,
 
     /* Need to ensure the message has changed when displaying updates to it.
         This stops delays and flickers in the status text. */
-    if (Message != TextContext->PreviousProgressMessage) {
+    if (Message != TextContext->PreviousProgressMessage || 0 == Current) {
         if (TextContext->PreviousProgressMessageLength > 0) {
             STOP->SetCursorPosition(STOP, (ModeColumns / 2) - (TextContext->PreviousProgressMessageLength / 2), 4);
             STOP->SetAttribute(STOP, CONFIG->Colors.Background);

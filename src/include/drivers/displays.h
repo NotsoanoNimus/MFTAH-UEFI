@@ -34,6 +34,10 @@ EXTERN CHAR8 *MaxTimeoutStr;
 EXTERN CHAR8 *NoTimeoutStr;
 EXTERN CHAR8 *DefaultTimeoutStr;
 EXTERN CHAR8 *MaxTimeoutExceededtStr;
+EXTERN CHAR8 *PanicPrefix;
+
+#define ERROR_STRING_BUFFER_SIZE    64
+EXTERN CHAR16 ErrorStringBuffer[];
 
 
 typedef
@@ -119,6 +123,7 @@ VOID
 (EFIAPI *HOOK_DISPLAY_MODE__PANIC)(
     IN  CONST   SIMPLE_DISPLAY  *This,
     IN          CHAR8           *Message,
+    IN          EFI_STATUS      Status,
     IN          BOOLEAN         IsShutdown,
     IN          UINTN           ShutdownTimer
 );

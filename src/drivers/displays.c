@@ -7,6 +7,9 @@ CHAR8 *MaxTimeoutStr = "Global timeout in %u seconds.";
 CHAR8 *NoTimeoutStr = "No timeout values are set.";
 CHAR8 *DefaultTimeoutStr = "Choosing default menu option...";
 CHAR8 *MaxTimeoutExceededtStr = "Maximum timeout exceeded! Shutting down!";
+CHAR8 *PanicPrefix = "PANIC: ";
+
+CHAR16 ErrorStringBuffer[ERROR_STRING_BUFFER_SIZE] = {0};
 
 
 SIMPLE_DISPLAY *DISPLAY = NULL;

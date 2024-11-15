@@ -65,6 +65,7 @@ STATIC VOID GraphicsClearScreen(
 STATIC VOID GraphicsPanic(
     IN CONST SIMPLE_DISPLAY *This,
     IN CHAR8 *Message,
+    IN EFI_STATUS Status,
     IN BOOLEAN IsShutdown,
     IN UINTN ShutdownTimer
 );
@@ -566,7 +567,11 @@ GraphicsInit__SkipVideoMode:
                           1,
                           &ProgressBlt);
     if (EFI_ERROR(Status)) {
-        This->Panic(This, "Failed to allocate a BLT for the progress notifier.", FALSE, 0);
+        This->Panic(This,
+                    "Failed to allocate a BLT for the progress notifier.",
+                    Status,
+                    FALSE,
+                    0);
         return EFI_NOT_STARTED;
     }
 
@@ -581,7 +586,11 @@ GraphicsInit__SkipVideoMode:
                           1,
                           &MftahKeyPromptBlt);
     if (EFI_ERROR(Status)) {
-        This->Panic(This, "Failed to allocate a BLT for the MFTAH key prompt.", FALSE, 0);
+        This->Panic(This,
+                    "Failed to allocate a BLT for the MFTAH key prompt.",
+                    Status,
+                    FALSE,
+                    0);
         return EFI_NOT_STARTED;
     }
 
@@ -594,7 +603,11 @@ GraphicsInit__SkipVideoMode:
                           2,
                           &LoadingIconUnderlayBlt);
     if (EFI_ERROR(Status)) {
-        This->Panic(This, "Failed to allocate the loading animation underlay BLT.", FALSE, 0);
+        This->Panic(This,
+                    "Failed to allocate the loading animation underlay BLT.",
+                    Status,
+                    FALSE,
+                    0);
         return EFI_NOT_STARTED;
     }
 
@@ -614,9 +627,7 @@ GraphicsDestroy(IN CONST SIMPLE_DISPLAY *This)
     for (UINTN i = 0; i < RenderablesLength; ++i) {
         if (NULL == Renderables[i]) continue;
 
-        FreePool((VOID *)(Renderables[i]->Buffer));
-        FreePool(Renderables[i]);
-
+        BltDestroy(Renderables[i]);
         Renderables[i] = NULL;
     }
     RenderablesLength = 0;
@@ -630,13 +641,14 @@ GraphicsDestroy(IN CONST SIMPLE_DISPLAY *This)
     FreePool(GraphicsContext);
 
     /* Free protocol pointers. */
-    FreePool((VOID *)FB->BLT->Buffer);
-    FreePool(FB->BLT);
+    BltDestroy(FB->BLT);
     FreePool(FB);
     FB = NULL;
 
     FreePool(This->MENU);
+
     FreePool(Vertices);
+    Vertices = NULL;
 
     return EFI_SUCCESS;
 }
@@ -656,18 +668,37 @@ STATIC
 VOID
 GraphicsPanic(IN CONST SIMPLE_DISPLAY *This,
               IN CHAR8 *Message,
+              IN EFI_STATUS Status,
               IN BOOLEAN IsShutdown,
               IN UINTN ShutdownTimer)
 {
-    CHAR8 *Shadow = (CHAR8 *)
-        AllocateZeroPool(sizeof(CHAR8) + (AsciiStrLen(Message) + 7 + 1));
+    /* Idk wtf is going on with these SPrint commands, but the allocation requires
+        way more than just the extra characters being appended on and it's annoying AF. */
+    UINTN MessageLength = AsciiStrLen(Message),
+          PanicPrefixLength = AsciiStrLen(PanicPrefix),
+          ErrorStringLength = 0;
 
-    if (NULL == Shadow) {
+    SetMem(ErrorStringBuffer, ERROR_STRING_BUFFER_SIZE, 0x00);
+    StatusToString(ErrorStringBuffer, Status);
+    ErrorStringBuffer[ERROR_STRING_BUFFER_SIZE - 1] = L'\0';
+    ErrorStringLength = StrLen(ErrorStringBuffer);
+
+    CHAR8 *ErrorStr = UnicodeStrToAscii(ErrorStringBuffer);
+    CHAR8 *Shadow = (CHAR8 *)
+        AllocateZeroPool(sizeof(CHAR8) * (PanicPrefixLength + MessageLength + ErrorStringLength + 2));
+
+    if (NULL == Shadow || NULL == ErrorStr) {
         GPrint(Message, FB->BLT, 20, 20, 0xFFFF0000, 0, TRUE, 2);
     } else {
-        AsciiSPrint(Shadow, (AsciiStrLen(Message) + 7), "PANIC: %a", Message);
+        CopyMem(Shadow, PanicPrefix, PanicPrefixLength);
+        CopyMem((VOID *)&Shadow[PanicPrefixLength], Message, MessageLength);
+        Shadow[PanicPrefixLength + MessageLength] = ' ';
+        CopyMem((VOID *)&Shadow[PanicPrefixLength + MessageLength + 1], ErrorStr, ErrorStringLength);
+
         GPrint(Shadow, FB->BLT, 20, 20, 0xFFFF0000, 0, TRUE, 2);
+
         FreePool(Shadow);
+        FreePool(ErrorStr);
     }
 
     FB->Flush(FB);
@@ -959,9 +990,6 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
         }
     }
 
-    /* Render the underlay and then the initial state of the loading animation. */
-    FB->Flush(FB);
-
     while (TRUE == *Stall) {
         /* Flash the underlay into the animation BLT to 'reset' the drawn lines. */
         if (EFI_SUCCESS != FB->BltToBlt(FB, s, Underlay, Origin, Origin, Size)) {
@@ -991,12 +1019,9 @@ LoadingAnimationLoop(BOUNDED_SHAPE *Underlay,
         FB->DrawPolygon(FB, s, VerticesCount, Vertices, ColorARGB, TRUE);
 
         /* Partial rendering. */
-        if (EFI_SUCCESS != FB->BltToBlt(FB, FB->BLT, s, Position, Origin, Size)) {
-            Status = EFI_LOAD_ERROR;
-            goto LoadingAnimation__ExitError;
+        if (EFI_ERROR((Status = FB->RenderComponent(FB, s, TRUE)))) {
+            goto LoadingAnimation__ExitError;    
         }
-
-        FB->FlushPartial(FB, Position.X, Position.Y, Position.X, Position.Y, Size.Width, Size.Height);
 
         /* 25 ms delay between shifts */
         BS->Stall(25000);

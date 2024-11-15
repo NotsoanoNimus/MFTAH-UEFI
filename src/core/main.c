@@ -240,9 +240,11 @@ MenuLoop__Main:
                         : 0);
 
     if (EFI_ERROR(Status) && EFI_TIMEOUT != Status) {
-        DISPLAY->Panic(DISPLAY, "Unknown keyboard input failure.", FALSE, 0);
-        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
-
+        DISPLAY->Panic(DISPLAY,
+                       "Irrecoverable keyboard input failure.",
+                       Status,
+                       FALSE,
+                       EFI_SECONDS_TO_MICROSECONDS(5));
         Status = EFI_DEVICE_ERROR;
         goto MenuLoop__Break;
     }

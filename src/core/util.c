@@ -432,7 +432,7 @@ UnicodeStrToAscii(IN CHAR16 *Src)
     if (NULL == Ret) return NULL;
 
     for (UINTN i = 0; i < StrLen(Src); ++i)
-        Ret[i] = *((CHAR8 *)(Src[i]));
+        Ret[i] = *((CHAR8 *)&(Src[i]));
 
     return Ret;
 }

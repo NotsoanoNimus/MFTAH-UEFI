@@ -45,6 +45,7 @@ STATIC VOID TextClearScreen(
 STATIC VOID TextPanic(
     IN CONST SIMPLE_DISPLAY *This,
     IN CHAR8 *Message,
+    IN EFI_STATUS Status,
     IN BOOLEAN IsShutdown,
     IN UINTN ShutdownTimer
 );
@@ -180,7 +181,7 @@ DrawMenu(IN MENU_STATE *m)
 
         CHAR8 *ChainNameCopy = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (ChainNameLength + 1));
         if (NULL == ChainNameCopy) {
-            TUI.Panic(&TUI, "Out of memory!", TRUE, 10000000);
+            TUI.Panic(&TUI, "Out of memory!", EFI_OUT_OF_RESOURCES, TRUE, EFI_SECONDS_TO_MICROSECONDS(10));
         }
         CopyMem(ChainNameCopy, CONFIG->Chains[i]->Name, ChainNameLength);
 
@@ -284,7 +285,7 @@ DrawMenu__OnlyMenuUpdate:
         NameLength = AsciiStrLen(CONFIG->Chains[m->CurrentItemIndex]->Name);
         NameCopy = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (NameLength + 1));
         if (NULL == NameCopy) {
-            TUI.Panic(&TUI, "Out of memory!", TRUE, 10000000);
+            TUI.Panic(&TUI, "Out of memory!", EFI_OUT_OF_RESOURCES, TRUE, EFI_SECONDS_TO_MICROSECONDS(10));
         }
         CopyMem(NameCopy, CONFIG->Chains[m->CurrentItemIndex]->Name, NameLength);
 
@@ -360,7 +361,7 @@ DrawMenu__OnlyMenuUpdate:
         NameLength = AsciiStrLen(CONFIG->Chains[TextContext->PreviousSelectedIndex]->Name);
         NameCopy = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (NameLength + 1));
         if (NULL == NameCopy) {
-            TUI.Panic(&TUI, "Out of memory!", TRUE, 10000000);
+            TUI.Panic(&TUI, "Out of memory!", EFI_OUT_OF_RESOURCES, TRUE, EFI_SECONDS_TO_MICROSECONDS(10));
         }
         CopyMem(NameCopy, CONFIG->Chains[TextContext->PreviousSelectedIndex]->Name, NameLength);
 
@@ -694,27 +695,40 @@ STATIC
 VOID
 TextPanic(IN CONST SIMPLE_DISPLAY *This,
           IN CHAR8 *Message,
+          IN EFI_STATUS Status,
           IN BOOLEAN IsShutdown,
           IN UINTN ShutdownTimer)
 {
     STOP->SetAttribute(STOP, MFTAH_COLOR_PANIC);
-    CONST CHAR *PanicPrefix = "PANIC: ";
-    UINTN MessageLength = AsciiStrLen(Message);
+    UINTN MessageLength = AsciiStrLen(Message),
+          PanicPrefixLength = AsciiStrLen(PanicPrefix),
+          ErrorStringLength = 0;
 
+    SetMem(ErrorStringBuffer, ERROR_STRING_BUFFER_SIZE, 0x00);
+    StatusToString(ErrorStringBuffer, Status);
+    ErrorStringBuffer[ERROR_STRING_BUFFER_SIZE - 1] = L'\0';
+    ErrorStringLength = StrLen(ErrorStringBuffer);
+
+    CHAR8 *ErrorStr = UnicodeStrToAscii(ErrorStringBuffer);
     CHAR8 *Shadow = (CHAR8 *)
-        AllocateZeroPool(sizeof(CHAR8) + (MessageLength + 7 + 1));
+        AllocateZeroPool(sizeof(CHAR8) * (PanicPrefixLength + MessageLength + ErrorStringLength + 2));
 
-    if (NULL == Shadow) {
+    if (NULL == Shadow || NULL == ErrorStr) {
         TPrint(Message, 3, 3, MFTAH_COLOR_PANIC, TRUE);
     } else {
-        CopyMem(Shadow, PanicPrefix, 7);
-        CopyMem((VOID *)((EFI_PHYSICAL_ADDRESS)Shadow + 7), Message, MessageLength);
+        CopyMem(Shadow, PanicPrefix, PanicPrefixLength);
+        CopyMem((VOID *)&Shadow[PanicPrefixLength], Message, MessageLength);
+        Shadow[PanicPrefixLength + MessageLength] = ' ';
+        CopyMem((VOID *)&Shadow[PanicPrefixLength + MessageLength + 1], ErrorStr, ErrorStringLength);
+
         TPrint(Shadow, 3, 3, MFTAH_COLOR_PANIC, TRUE);
+
         FreePool(Shadow);
+        FreePool(ErrorStr);
     }
 
     if (0 == ShutdownTimer) {
-        BS->Stall(3000000);
+        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
     } else {
         BS->Stall(ShutdownTimer);
     }

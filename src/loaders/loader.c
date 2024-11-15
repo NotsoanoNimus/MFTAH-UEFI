@@ -394,6 +394,7 @@ EFIAPI
 EFI_STATUS
 LoaderGetAndValidateMftahKey(IN LOADER_CONTEXT *Context)
 {
+    EFI_STATUS Status = EFI_SUCCESS;
     mftah_status_t MftahStatus = MFTAH_SUCCESS;
     mftah_protocol_t *MftahProtocol = NULL;
     CHAR8 *p = NULL, *Password = NULL;
@@ -459,8 +460,12 @@ GetPassword__Repeat:
 GetPassword__NoRedraw:
         SetMem(&Key, sizeof(EFI_KEY_DATA), 0x00);
 
-        if (EFI_ERROR(ReadKey(&Key, 0))) {
-            DISPLAY->Panic(DISPLAY, "Unknown keyboard input failure.", TRUE, 10000000);
+        if (EFI_ERROR((Status = ReadKey(&Key, 0)))) {
+            DISPLAY->Panic(DISPLAY,
+                           "Irrecoverable keyboard input failure.",
+                           Status,
+                           TRUE,
+                           EFI_SECONDS_TO_MICROSECONDS(10));
             HALT;
         }
 
@@ -557,8 +562,11 @@ SpawnMftahDecryptionWorkers(IN mftah_immutable_protocol_t Mftah,
 
     /* The library should never return a thread index higher than what is possible. */
     if (WorkOrder->thread_index >= MFTAH_MAX_THREAD_COUNT) {
-        Status = EFI_ABORTED;
-        DISPLAY->Panic(DISPLAY, "Encountered an invalid thread index while decrypting.", TRUE, 10000000);
+        DISPLAY->Panic(DISPLAY,
+                       "Encountered an invalid thread index while decrypting.",
+                       EFI_ABORTED,
+                       TRUE,
+                       EFI_SECONDS_TO_MICROSECONDS(10));
     }
 
     if (!WorkOrder->length) return MFTAH_SUCCESS;
@@ -572,7 +580,8 @@ SpawnMftahDecryptionWorkers(IN mftah_immutable_protocol_t Mftah,
 
     // if (!IsThreadingEnabled()) {
         /* This will synchronously run the operation. Each progress message is tracked individually. */
-        CHAR8 *ProgressMessage = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (128 + 1));
+        CHAR8 *ProgressMessage =
+            (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (128 + 1));
         AsciiSPrint(ProgressMessage, 128, "Decrypting Block %u...", (WorkOrder->thread_index + 1));
 
         ProgressStatusMessage = ProgressMessage;
@@ -692,10 +701,14 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
     EFI_STATUS Status = EFI_SUCCESS;
 
     /* Set up the context object and send it to the right chain. */
-    LOADER_CONTEXT *Context = (LOADER_CONTEXT *)AllocateZeroPool(sizeof(LOADER_CONTEXT));
+    LOADER_CONTEXT *Context =
+        (LOADER_CONTEXT *)AllocateZeroPool(sizeof(LOADER_CONTEXT));
     if (NULL == Context) {
-        Status = EFI_OUT_OF_RESOURCES;
-        DISPLAY->Panic(DISPLAY, "Failed to allocate loader context: out of resources!", TRUE, 10000000);
+        DISPLAY->Panic(DISPLAY,
+                       "Failed to allocate loader context.",
+                       EFI_OUT_OF_RESOURCES,
+                       TRUE,
+                       EFI_SECONDS_TO_MICROSECONDS(10));
     }
 
     /* Preserve the pointer to the chain in the context. */
@@ -713,8 +726,13 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
         DATA_RAMDISK *r = chain->DataRamdisks[i];
 
         Status = LoaderReadDataRamdisk(r, Context);
+
         if (EFI_ERROR(Status) && TRUE == r->IsRequired) {
-            DISPLAY->Panic(DISPLAY, "Could not register the required data ramdisk.", TRUE, 10000000);
+            DISPLAY->Panic(DISPLAY,
+                           "Could not register the required data ramdisk.",
+                           Status,
+                           TRUE,
+                           EFI_SECONDS_TO_MICROSECONDS(10));
         }
     }
 
@@ -723,7 +741,11 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
 
     /* Read the payload file from block storage. */
     if (EFI_ERROR((Status = LoaderReadImage(Context)))) {
-        DISPLAY->Panic(DISPLAY, "Failed to read the target payload into memory.", TRUE, 10000000);
+        DISPLAY->Panic(DISPLAY,
+                       "Failed to read the target payload.",
+                       Status,
+                       TRUE,
+                       EFI_SECONDS_TO_MICROSECONDS(10));
     }
 
     /* Check the chain's properties. This occurs in a certain order. For example,
@@ -737,7 +759,11 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
         /* Prompt for a password if necessary. This also creates the MFTAH
             payload wrapper object. */
         if (EFI_ERROR((Status = LoaderGetAndValidateMftahKey(Context)))) {
-            DISPLAY->Panic(DISPLAY, "Fatal exception while capturing MFTAH key.", TRUE, 10000000);
+            DISPLAY->Panic(DISPLAY,
+                           "Fatal exception while capturing MFTAH key.",
+                           Status,
+                           TRUE,
+                           EFI_SECONDS_TO_MICROSECONDS(10));
         }
 
         /* Clear the screen. */
@@ -745,7 +771,11 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
         ProgressStatusMessage = "Decrypting...";
 
         if (EFI_ERROR((Status = LoaderMftahDecrypt(Context)))) {
-            DISPLAY->Panic(DISPLAY, "MFTAH decryption encountered a fatal exception.", TRUE, 10000000);
+            DISPLAY->Panic(DISPLAY,
+                           "MFTAH decryption encountered a fatal exception.",
+                           Status,
+                           TRUE,
+                           EFI_SECONDS_TO_MICROSECONDS(10));
         }
     }
 
@@ -756,7 +786,11 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
         ProgressStatusMessage = "Decompressing...";
 
         if (EFI_ERROR((Status = LoaderDecompress(Context)))) {
-            DISPLAY->Panic(DISPLAY, "Decompression returned an irrecoverable failure code.", TRUE, 10000000);
+            DISPLAY->Panic(DISPLAY,
+                           "Decompression returned an irrecoverable failure code.",
+                           Status,
+                           TRUE,
+                           EFI_SECONDS_TO_MICROSECONDS(10));
         }
     }
 

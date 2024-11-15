@@ -49,8 +49,9 @@ LoadImage(IN LOADER_CONTEXT *Context)
 LoadImage__ErrorNoCmdLine:
     DISPLAY->Panic(DISPLAY,
                    "Failed to pass the command line to the loaded image.",
+                   (EFI_SUCCESS == Status ? EFI_LOAD_ERROR : Status),
                    TRUE,
-                   10000000);
+                   EFI_SECONDS_TO_MICROSECONDS(10));
     HALT;
 
 LoadImage__NoCmdLine:

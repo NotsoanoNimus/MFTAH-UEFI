@@ -737,16 +737,11 @@ GraphicsPrintProgress(IN CONST SIMPLE_DISPLAY *This,
     );
     FB->DrawSimpleShape(
         FB, ProgressBlt, FbShapeRectangle,
-        ProgressRect, ProgressRectTo, 0, FALSE, 1, 0x00000000
+        ProgressRect, ProgressRectTo, 0, FALSE, 1, CONFIG->Colors.Title.Foreground
     );
 
     /* Full progress BLT box border. */
-    FB_VERTEX Origin = {0};
-    FB_VERTEX FullBltEnd = { .X = ProgressBlt->Dimensions.Width, .Y = ProgressBlt->Dimensions.Height };
-    FB->DrawSimpleShape(
-        FB, ProgressBlt, FbShapeRectangle,
-        Origin, FullBltEnd, 0, FALSE, 1, CONFIG->Colors.Text.Foreground
-    );
+    BltDrawOutline(ProgressBlt, CONFIG->Colors.Text.Foreground);
 
     FB->RenderComponent(FB, ProgressBlt, TRUE);
 }
@@ -1056,9 +1051,7 @@ DECL_DRAW_FUNC(LeftPanel)
            GraphicsContext->Zoom);
     GraphicsContext->Zoom--;
 
-    /* Draw a box outline. */
-    FB_VERTEX f = {0}, t = { .X = This->Dimensions.Width-1, .Y = This->Dimensions.Height-1 };
-    FB->DrawSimpleShape(FB, This, FbShapeRectangle, f, t, 0, FALSE, 1, 0x00000000);
+    BltDrawOutline(This, CONFIG->Colors.Text.Foreground);
 }
 
 
@@ -1069,9 +1062,7 @@ DECL_DRAW_FUNC(RightPanel)
 
     FB->ClearBlt(FB, This, &border);
 
-    /* Draw a box outline. */
-    FB_VERTEX f = {0}, t = { .X = This->Dimensions.Width-1, .Y = This->Dimensions.Height-1 };
-    FB->DrawSimpleShape(FB, This, FbShapeRectangle, f, t, 0, FALSE, 1, 0x00000000);
+    BltDrawOutline(This, CONFIG->Colors.Text.Foreground);
 
     // TODO: generate these during config parsing and attach them to the chains themselves as a property
     // This is otherwise annoyingly expensive
@@ -1100,9 +1091,7 @@ DECL_DRAW_FUNC(Banner)
 
     FB->ClearBlt(FB, This, &banner);
 
-    /* Draw a box outline. */
-    FB_VERTEX f = {0}, t = { .X = This->Dimensions.Width-1, .Y = This->Dimensions.Height-1 };
-    FB->DrawSimpleShape(FB, This, FbShapeRectangle, f, t, 0, FALSE, 1, 0x00000000);
+    BltDrawOutline(This, CONFIG->Colors.Text.Foreground);
 
     GPrint(
         c->Banner,
@@ -1124,9 +1113,7 @@ DECL_DRAW_FUNC(Timeouts)
     BltPixelFromARGB(&timeout, c->Colors.Timer.Background);
     FB->ClearBlt(FB, This, &timeout);
 
-    /* Draw a box outline. */
-    FB_VERTEX f = {0}, t = { .X = This->Dimensions.Width-1, .Y = This->Dimensions.Height-1 };
-    FB->DrawSimpleShape(FB, This, FbShapeRectangle, f, t, 0, FALSE, 1, 0x00000000);
+    BltDrawOutline(This, CONFIG->Colors.Text.Foreground);
 
     if (FALSE == m->KeyPressReceived && c->Timeout > 0) {
         if (m->MillisecondsElapsed < c->Timeout) {
@@ -1217,8 +1204,6 @@ DECL_DRAW_FUNC(MenuItem)
     }
 
     if (index == m->CurrentItemIndex) {
-        /* Draw a box outline to beter 'highlight' the selection. */
-        FB_VERTEX f = {0}, t = { .X = This->Dimensions.Width-1, .Y = This->Dimensions.Height-1 };
-        FB->DrawSimpleShape(FB, This, FbShapeRectangle, f, t, 0, FALSE, 1, ARGBFromBltPixel(&itemfg));
+        BltDrawOutline(This, CONFIG->Colors.Text.Foreground);
     }
 }

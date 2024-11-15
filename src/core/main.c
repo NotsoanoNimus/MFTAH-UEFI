@@ -162,9 +162,7 @@ EnterMenu()
     for (UINTN i = 0; i < CONFIG->ChainsLength; ++i) {
         if (CONFIG->Chains[i]->IsImmediate) {
             CHAR8 *ValidationErrorMsg = (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * 256);
-            if (NULL == ValidationErrorMsg) {
-                // TODO: Error popup?? Out of memory, so this might mean the program needs to stop.
-            }
+            if (NULL == ValidationErrorMsg) return EFI_OUT_OF_RESOURCES;
 
             /* Open the chain immediately. */
             FreePool(ValidationErrorMsg);

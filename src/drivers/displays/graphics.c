@@ -835,7 +835,7 @@ GraphicsInputPopup(IN CONST SIMPLE_DISPLAY *This,
 
     /* Full BLT box border. */
     FB_VERTEX Origin = {0};
-    FB_VERTEX FullBltEnd = { .X = MftahKeyPromptBlt->Dimensions.Width, .Y = MftahKeyPromptBlt->Dimensions.Height };
+    FB_VERTEX FullBltEnd = { .X = MftahKeyPromptBlt->Dimensions.Width-1, .Y = MftahKeyPromptBlt->Dimensions.Height-1 };
     FB->DrawSimpleShape(FB, MftahKeyPromptBlt, FbShapeRectangle, Origin, FullBltEnd, 0, FALSE, 1, CONFIG->Colors.Title.Foreground);
 
     /* Never exceed the width of the box when GPrint'ing. */

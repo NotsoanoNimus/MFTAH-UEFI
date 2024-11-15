@@ -665,8 +665,9 @@ VOID
 LoaderDestroyContext(IN LOADER_CONTEXT *Context)
 {
     /* One of the final methods called by this program. Therefore, it should also
-        destroy the current framebuffer handle. */
-    ConfigDestroyChain(Context->Chain);
+        destroy the current framebuffer/display handle. NOTE that we don't destroy
+        the Context->Chain item directly, because it's included in ConfigDestroy. We
+        also don't destroy the loaded device path or ramdisk (obviously). */
     FreePool(Context->MftahPayloadWrapper);
     FreePool(Context);
 
@@ -692,9 +693,6 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
         Through this method, we're effectively just switching back to a simple text mode. */
     EFI_STATUS Status = EFI_SUCCESS;
 
-    /* Making access of this variable more terse. */
-    CONFIG_CHAIN_BLOCK *chain = CONFIG->Chains[SelectedChainIndex];
-
     /* Set up the context object and send it to the right chain. */
     LOADER_CONTEXT *Context = (LOADER_CONTEXT *)AllocateZeroPool(sizeof(LOADER_CONTEXT));
     if (NULL == Context) {
@@ -703,7 +701,10 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
     }
 
     /* Preserve the pointer to the chain in the context. */
-    Context->Chain = chain;
+    Context->Chain = CONFIG->Chains[SelectedChainIndex];
+
+    /* Making access of this variable more terse. */
+    CONFIG_CHAIN_BLOCK *chain = CONFIG->Chains[SelectedChainIndex];
 
     /* Clear the screen. */
     DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
@@ -761,6 +762,8 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
         }
     }
 
+    DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
+
     /* Load the image based on the chain's type. */
     switch (chain->Type) {
         case DISK:  DiskLoader .Load(Context); break;
@@ -772,5 +775,7 @@ LoaderEnterChain(IN UINTN SelectedChainIndex)
 
     /* End of the road. */
     Status = EFI_NOT_STARTED;
-    DISPLAY->Panic(DISPLAY, "Could not transfer control to the right loader.", TRUE, 10000000);
+
+    /* NOTE: need to use the old PANIC here because the DISPLAY was likely freed already. */
+    PANIC("Could not transfer control to the right loader.");
 }

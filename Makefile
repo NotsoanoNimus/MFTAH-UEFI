@@ -39,11 +39,16 @@ SRCS_ARCH		= $(shell find $(GNUEFI_DIR)/lib/$(ARCH) -maxdepth 1 -type f -name "*
 SRCS_RT			= $(shell find $(GNUEFI_DIR)/lib/runtime -maxdepth 1 -type f -name "*.c")
 SRCS_MFTAHUEFI	= $(shell find $(SRC_DIR) -type f -name "*.c")
 
+PSF_SRC			= $(SRC_DIR)/core/font.c
+RAMDISK_AML_SRC = $(SRC_DIR)/Ramdisk.aml.c
+
 OBJS_GNUEFI		= $(patsubst %.c,%.o,$(SRCS_GNU_EFI) $(SRCS_ARCH) $(SRCS_RT))
 OBJS_MFTAHUEFI	= $(patsubst %.c,%.o,$(SRCS_MFTAHUEFI))
 
+PSF_OBJ			= $(SRC_DIR)/core/font.o
+RAMDISK_AML_OBJ = $(SRC_DIR)/Ramdisk.aml.o
+
 OBJS			= $(OBJS_GNUEFI) $(OBJS_MFTAHUEFI)
-PSF_SRC			= $(SRC_DIR)/core/font.c
 
 TARGET			= MFTAH.EFI
 
@@ -64,8 +69,9 @@ clean: clean-objs
 clean-objs:
 	-rm $(OBJS) &>/dev/null
 	-rm $(PSF_SRC) &>/dev/null
-	-rm $(SRC_DIR)/Ramdisk.aml
-	-rm $(SRC_DIR)/Ramdisk.aml.c
+	-rm $(PSF_OBJ) &>/dev/null
+	-rm $(RAMDISK_AML_SRC) &>/dev/null
+	-rm $(RAMDISK_AML_OBJ) &>/dev/null
 
 # We can assume a 'clean' should be run on all .o files
 #   after the build completes. This is because compilation
@@ -75,31 +81,29 @@ debug: CFLAGS += -DEFI_DEBUG=1
 debug: TARGET = $(TARGET).DEBUG
 debug: $(TARGET) clean-objs
 
-all: $(SRC_DIR)/Ramdisk.aml.c $(TARGET)
+all: $(TARGET)
 
 %.o: %.c
 	$(CXX) $(CFLAGS) -c -o $@ $<
 
 
-font:
+$(PSF_OBJ):
 	xxd -i font.psf >$(PSF_SRC)
-	$(CXX) $(CFLAGS) -c -o $(SRC_DIR)/core/font.o $(PSF_SRC)
+	$(CXX) $(CFLAGS) -c -o $(PSF_OBJ) $(PSF_SRC)
 
 
-ramdisk_ssdt: $(SRC_DIR)/Ramdisk.aml.c
-	$(CXX) $(CFLAGS) -c -o $(SRC_DIR)/Ramdisk.aml.o $(SRC_DIR)/Ramdisk.aml.c
-
-$(SRC_DIR)/Ramdisk.aml.c: $(SRC_DIR)/Ramdisk.asl
+$(RAMDISK_AML_OBJ): $(SRC_DIR)/Ramdisk.asl
 	iasl $(SRC_DIR)/Ramdisk.asl
-	echo "unsigned char __attribute__((aligned(8))) NvdimmRootAml[] = {" >$(SRC_DIR)/Ramdisk.aml.c
-	cat $(SRC_DIR)/Ramdisk.aml | xxd -i >>$(SRC_DIR)/Ramdisk.aml.c
-	echo -ne "};\nunsigned int NvdimmRootAmlLength = " >>$(SRC_DIR)/Ramdisk.aml.c
-	wc -c $(SRC_DIR)/Ramdisk.aml | cut -d' ' -f1 | tr -d '\n' >>$(SRC_DIR)/Ramdisk.aml.c
-	echo ";" >>$(SRC_DIR)/Ramdisk.aml.c
+	echo "unsigned char __attribute__((aligned(8))) NvdimmRootAml[] = {" >$(RAMDISK_AML_SRC)
+	cat $(SRC_DIR)/Ramdisk.aml | xxd -i >>$(RAMDISK_AML_SRC)
+	echo -ne "};\nunsigned int NvdimmRootAmlLength = " >>$(RAMDISK_AML_SRC)
+	wc -c $(SRC_DIR)/Ramdisk.aml | cut -d' ' -f1 | tr -d '\n' >>$(RAMDISK_AML_SRC)
+	echo ";" >>$(RAMDISK_AML_SRC)
+	$(CXX) $(CFLAGS) -c -o $(RAMDISK_AML_OBJ) $(RAMDISK_AML_SRC)
 
 
-$(TARGET): font ramdisk_ssdt $(SRC_DIR)/Ramdisk.aml.o $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)
-	$(CXX) $(LDFLAGS) -o $(TARGET) $(SRC_DIR)/core/font.o $(SRC_DIR)/Ramdisk.aml.o $(OBJS) $(LIBMFTAH)
+$(TARGET): $(PSF_OBJ) $(RAMDISK_AML_OBJ) $(LIBGNUEFI) $(LIBEFI) $(LIBMFTAH) $(OBJS)
+	$(CXX) $(LDFLAGS) -o $(TARGET) $(RAMDISK_AML_OBJ) $(PSF_OBJ) $(OBJS) $(LIBMFTAH)
 
 
 # README dependency ensures the submodule is cloned 'properly'.

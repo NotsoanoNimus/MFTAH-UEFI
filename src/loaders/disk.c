@@ -16,9 +16,8 @@ VOID
 LoadImage(IN LOADER_CONTEXT *Context)
 {
     /* The context contains the base address and length of a ramdisk to load
-     * a target executable from (specified in the chain). Search for the file
-     * then load it and execute it based on its specified sub-type. */
-    /* ===== */
+        a target executable from (specified in the chain). Search for the file
+        then load it and execute it based on its specified sub-type. */
     EFI_STATUS Status = EFI_SUCCESS;
     EFI_DEVICE_PATH_PROTOCOL *RamdiskDevicePath = NULL;
     EFI_HANDLE RamdiskDeviceHandle = NULL;
@@ -27,7 +26,8 @@ LoadImage(IN LOADER_CONTEXT *Context)
     VOID *NestedChainloadFileBuffer = NULL;
     UINTN NestedChainloadFileSize = 0;
 
-    /* First, set up the ramdisk through the driver. This registers it as an available SFS handle. */
+    /* First, set up the ramdisk through the driver. This registers it as an available
+        SFS handle (given it contains a FAT filesystem). */
     Status = RAMDISK.Register(Context->LoadedImageBase,
                               Context->LoadedImageSize,
                               &gEfiRamdiskVirtualDiskGuid,
@@ -50,7 +50,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
     Status = BS->LocateDevicePath(&gEfiSimpleFileSystemProtocolGuid,
                                   (VOID **)&RamdiskDevicePath,
                                   &RamdiskDeviceHandle);
-
     if (EFI_ERROR(Status)) {
         /* Try an alternative, iterative method. */
         Status = BS->LocateHandleBuffer(ByProtocol,

@@ -103,8 +103,6 @@ LoaderReadImageParts(IN LOADER_CONTEXT *Context,
         AsciiSPrint(CurrentPath, 128, "Reading Part %u...", (CurrentPart + 1));
         ProgressStatusMessage = CurrentPath;
 
-        DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
-
         Status = ReadFile(TargetHandle,
                           PayloadPath,
                           0U,

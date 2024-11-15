@@ -700,11 +700,11 @@ GraphicsPrintProgress(IN CONST SIMPLE_DISPLAY *This,
 
     FB_VERTEX ProgressRect = {
         .X = ProgressBlt->Dimensions.Width / 8,
-        .Y = ProgressBlt->Dimensions.Height - 60
+        .Y = ProgressBlt->Dimensions.Height - 90
     };
     FB_VERTEX ProgressRectTo = {
         .X = 7 * (ProgressBlt->Dimensions.Width / 8),
-        .Y = ProgressBlt->Dimensions.Height - 10
+        .Y = ProgressBlt->Dimensions.Height - 40
     };
     FB_VERTEX ProgressRectForegroundTo = {
         .X = ProgressRect.X + ((Current * (ProgressRectTo.X - ProgressRect.X)) / OutOfTotal),

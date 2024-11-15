@@ -24,10 +24,77 @@ FileSize(IN EFI_FILE_PROTOCOL *FileHandle)
 
 EFI_STATUS
 EFIAPI
+FileSizeFromPath(IN CHAR16 *Path,
+                 IN EFI_HANDLE BaseImageHandle,
+                 IN BOOLEAN HandleIsLoadedImage,
+                 OUT UINTN *SizeOutput)
+{
+    if (
+        NULL == BaseImageHandle
+        || NULL == Path
+        || NULL == SizeOutput
+    ) return EFI_INVALID_PARAMETER;
+
+    EFI_STATUS Status = EFI_SUCCESS;
+
+    EFI_LOADED_IMAGE_PROTOCOL *LoadedImage = NULL;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *ImageIoHandle = NULL;
+
+    EFI_FILE_PROTOCOL *VolumeHandle = NULL;
+    EFI_FILE_PROTOCOL *LoadedFileHandle = NULL;
+    UINTN ActualFileSize = 0;
+
+    if (TRUE == HandleIsLoadedImage) {
+        /* Open Loaded Image protocol handle. */
+        Status = BS->HandleProtocol(BaseImageHandle,
+                                    &gEfiLoadedImageProtocolGuid,
+                                    (VOID **)&LoadedImage);
+        if (EFI_ERROR(Status)) return Status;
+
+        BaseImageHandle = LoadedImage->DeviceHandle;
+    }
+
+    /* Use the device handle from the image to open the relative volume. */
+    Status = BS->HandleProtocol(BaseImageHandle,
+                                &gEfiSimpleFileSystemProtocolGuid,
+                                (VOID **)&ImageIoHandle);
+    if (EFI_ERROR(Status)) return Status;
+
+    /* Open the volume directly. */
+    Status = ImageIoHandle->OpenVolume(ImageIoHandle, &VolumeHandle);
+    if (EFI_ERROR(Status)) return Status;
+
+    /* Now try to load the file. */
+    Status = VolumeHandle->Open(VolumeHandle,
+                                &LoadedFileHandle,
+                                Path,
+                                EFI_FILE_MODE_READ,
+                                (EFI_FILE_READ_ONLY
+                                 | EFI_FILE_ARCHIVE
+                                 | EFI_FILE_HIDDEN
+                                 | EFI_FILE_SYSTEM));
+    if (EFI_ERROR(Status)) return Status;
+
+    /* Update the known size of the file. */
+    ActualFileSize = FileSize(LoadedFileHandle);
+    if (0 == ActualFileSize) {
+        Status = EFI_END_OF_FILE;
+    }
+
+    LoadedFileHandle->Close(LoadedFileHandle);
+    VolumeHandle->Close(VolumeHandle);
+
+    *SizeOutput = ActualFileSize;
+    return Status;
+}
+
+
+EFI_STATUS
+EFIAPI
 ReadFile(IN EFI_HANDLE BaseImageHandle,
          IN CONST CHAR16 *Filename,
          IN UINTN Offset,
-         OUT UINT8 **OutputBuffer,
+         IN OUT UINT8 **OutputBuffer,
          OUT UINTN *LoadedFileSize,
          IN BOOLEAN HandleIsLoadedImage,
          IN EFI_MEMORY_TYPE AllocatedMemoryType,
@@ -109,38 +176,35 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
         goto ReadFile__clean_up_and_exit;
     }
 
-    if (0 != RoundToBlockSize) {
-        /* Round the buffer up to the requested block size. */
-        *LoadedFileSize = (ActualFileSize) + (RoundToBlockSize - (ActualFileSize % RoundToBlockSize));
+    if (NULL == *OutputBuffer) {
+        if (0 != RoundToBlockSize) {
+            /* Round the buffer up to the requested block size. */
+            *LoadedFileSize = (ActualFileSize) + (RoundToBlockSize - (ActualFileSize % RoundToBlockSize));
+        } else {
+            *LoadedFileSize = ActualFileSize;
+        }
+
+        (*LoadedFileSize) += ExtraEndAllocation;
+
+        /* Stage the buffer in memory. */
+        Status = BS->AllocatePool(AllocatedMemoryType, *LoadedFileSize, (VOID **)&Buffer);
+        if (EFI_ERROR(Status) || NULL == Buffer) {
+            if (EFI_SUCCESS == Status) Status = EFI_ABORTED;
+            goto ReadFile__clean_up_and_exit;
+        }
+
+        if (0 != RoundToBlockSize || 0 != ExtraEndAllocation) {
+            /* Ensure the trailing padding (which won't have the file read into it) is explicitly set to zero. */
+            SetMem((VOID *)((EFI_PHYSICAL_ADDRESS)Buffer + (*LoadedFileSize) - RoundToBlockSize - ExtraEndAllocation),
+                   (RoundToBlockSize + ExtraEndAllocation),
+                   0x00);
+        }
     } else {
-        *LoadedFileSize = ActualFileSize;
-    }
-
-    (*LoadedFileSize) += ExtraEndAllocation;
-
-    /* Stage the buffer in memory. */
-    Status = uefi_call_wrapper(BS->AllocatePool, 3,
-                               AllocatedMemoryType,
-                               *LoadedFileSize,
-                               (VOID **)&Buffer);
-    if (EFI_ERROR(Status) || NULL == Buffer) {
-        Status = EFI_OUT_OF_RESOURCES;
-        goto ReadFile__clean_up_and_exit;
-    }
-
-    if (0 != RoundToBlockSize || 0 != ExtraEndAllocation) {
-        /* Ensure the trailing padding (which won't have the file read into it) is explicitly set to zero. */
-        SetMem((VOID *)((EFI_PHYSICAL_ADDRESS)Buffer + (*LoadedFileSize) - RoundToBlockSize - ExtraEndAllocation),
-                (RoundToBlockSize + ExtraEndAllocation),
-                0x00);
+        Buffer = *OutputBuffer;
     }
     
     /* Set the starting position to the `Offset` value. */
-    Status = uefi_call_wrapper(
-        LoadedFileHandle->SetPosition, 2,
-        LoadedFileHandle,
-        Offset
-    );
+    Status = LoadedFileHandle->SetPosition(LoadedFileHandle, Offset);
     if (EFI_ERROR(Status)) {
         FreePool(Buffer);
         goto ReadFile__clean_up_and_exit;
@@ -385,6 +449,22 @@ AsciiStrToUnicode(IN CHAR8 *Src)
         I'm busy making big assumptions that will turn out catastrophic. */
     for (UINTN i = 0; i < AsciiStrLen(Src); ++i)
         *((CHAR8 *)((EFI_PHYSICAL_ADDRESS)(Ret) + (2*i))) = Src[i];
+
+    return Ret;
+}
+
+
+CHAR8 *
+UnicodeStrToAscii(IN CHAR16 *Src)
+{
+    if (NULL == Src || 0 == StrLen(Src)) return NULL;
+
+    CHAR8 *Ret = (CHAR8 *)
+        AllocateZeroPool(sizeof(CHAR8) * (StrLen(Src) + 1));
+    if (NULL == Ret) return NULL;
+
+    for (UINTN i = 0; i < StrLen(Src); ++i)
+        Ret[i] = *((CHAR8 *)(Src[i]));
 
     return Ret;
 }

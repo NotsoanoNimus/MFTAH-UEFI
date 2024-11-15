@@ -20,19 +20,39 @@ FileSize(
 
 
 /**
+ * Get the size of the file from the given path name.
+ *
+ * @param[in]   Path                A full path to a file on-disk.
+ * @param[in]   BaseImageHandle     The handle of an image whose drive should be used when loading.
+ * @param[in]   HandleIsLoadedImage Whether the provided handle should be parsed as a Loaded Image handle.
+ * @param[out]  SizeOutput          Set to the size of the file on success. Set to NULL on error.
+ *
+ * @returns Whether the file could be found and sized. EFI_ERROR(x) otherwise.
+ */
+EFI_STATUS
+EFIAPI
+FileSizeFromPath(
+    IN  CHAR16      *Path,
+    IN  EFI_HANDLE  BaseImageHandle,
+    IN  BOOLEAN     HandleIsLoadedImage,
+    OUT  UINTN      *SizeOutput
+);
+
+
+/**
  * Attempt to read the contents of a file on the drive relative to
  *  the given image handle.
  * 
- * @param[in]   BaseImageHandle The handle of an image whose drive should be used when loading.
- * @param[in]   Filename        A full path to a file on-disk.
- * @param[in]   Offset          Starting offset into the file to read from.
- * @param[out]  OutputBuffer    Returns a pointer to the read buffer. NULL on error.
- * @param[out]  LoadedFileSize  Returns the length of the read file.
- * @param[in]   HandleIsLoadedImage Whether the provided handle should be parsed as a Loaded Image handle.
- * @param[in]   AllocatedMemoryType The EFI memory type to use when reserving the buffer.
- * @param[in]   RoundToBlockSize    Rounds up the size of the allocated buffer to a nearest multiple of this value, if not 0.
- * @param[in]   ExtraEndAllocation  Any additional allocation to make onto the end of the buffer.
- * @param[in]   ProgressHook    An optional function that can report occasional progress details.
+ * @param[in]       BaseImageHandle The handle of an image whose drive should be used when loading.
+ * @param[in]       Filename        A full path to a file on-disk.
+ * @param[in]       Offset          Starting offset into the file to read from.
+ * @param[in,out]   OutputBuffer    Returns a pointer to the read buffer. NULL on error. If the is not NULL on input, it is used as a load destination.
+ * @param[out]      LoadedFileSize  Returns the length of the read file.
+ * @param[in]       HandleIsLoadedImage Whether the provided handle should be parsed as a Loaded Image handle.
+ * @param[in]       AllocatedMemoryType The EFI memory type to use when reserving the buffer.
+ * @param[in]       RoundToBlockSize    Rounds up the size of the allocated buffer to a nearest multiple of this value, if not 0.
+ * @param[in]       ExtraEndAllocation  Any additional allocation to make onto the end of the buffer.
+ * @param[in]       ProgressHook    An optional function that can report occasional progress details.
  * 
  * @retval  EFI_SUCCESS     Successfully read the file and returned details.
  * @retval  EFI_NOT_FOUND   The file was not found relative to the handle, or could not be read.
@@ -47,7 +67,7 @@ ReadFile(
     IN EFI_HANDLE           BaseImageHandle,
     IN CONST CHAR16         *Filename,
     IN UINTN                Offset,
-    OUT UINT8               **OutputBuffer,
+    IN OUT UINT8            **OutputBuffer,
     OUT UINTN               *LoadedFileSize,
     IN BOOLEAN              HandleIsLoadedImage,
     IN EFI_MEMORY_TYPE      AllocatedMemoryType,
@@ -186,6 +206,17 @@ AsciiSPrint(
 CHAR16 *
 AsciiStrToUnicode(
     IN CHAR8    *Src
+);
+
+
+/**
+ * Attempt to convert a Unicode string (wide-char) to an ASCII string.
+ * 
+ * @returns A newly-allocated ASCII string, or NULL on error/empty source string.
+ */
+CHAR8 *
+UnicodeStrToAscii(
+    IN CHAR16   *Src
 );
 
 

@@ -3,8 +3,6 @@
 
 #include "../mftah_uefi.h"
 
-INTERFACE_DECL(S_MFTAH_THREAD);
-
 /* Mutex operations for threading. */
 #define MUTEX_SYNC(x) \
     while (TRUE == (x)) { \
@@ -43,6 +41,35 @@ struct {
 } MFTAH_SYSTEM_MP_CTX;
 
 
+/**
+ * A meta-container for thread objects. These get dynamically assigned to available MPS when started.
+ */
+typedef
+struct S_MFTAH_THREAD {
+    UINTN VOLATILE              AssignedProcessorNumber;
+    EFI_EVENT VOLATILE          CompletionEvent;
+    BOOLEAN VOLATILE            Started;
+    BOOLEAN VOLATILE            Finished;
+    EFI_STATUS VOLATILE         ExitStatus;
+    EFI_AP_PROCEDURE            Method;
+    VOID VOLATILE *VOLATILE     Context;
+} MFTAH_THREAD;
+
+
+/**
+ * Primary structure of decryption thread contexts using the MP library.
+ */
+typedef
+struct {
+    MFTAH_THREAD VOLATILE   *Thread;
+    UINT64                  CurrentPlace;
+    mftah_work_order_t      *WorkOrder;
+    mftah_progress_t        *Progress;
+    UINT8                   Sha256Key[SIZE_OF_SHA_256_HASH];
+    UINT8                   InitializationVector[AES_BLOCKLEN];
+} DECRYPT_THREAD_CTX;
+
+
 
 /**
  * Initialize the necessary static application variables and other platform information
@@ -54,7 +81,7 @@ struct {
  */
 EFI_STATUS
 EFIAPI
-InitializeThreading();
+InitializeThreading(VOID);
 
 
 /**
@@ -64,7 +91,7 @@ InitializeThreading();
  */
 BOOLEAN
 EFIAPI
-IsThreadingEnabled();
+IsThreadingEnabled(VOID);
 
 
 /**
@@ -72,7 +99,7 @@ IsThreadingEnabled();
  */
 UINTN
 EFIAPI
-GetThreadLimit();
+GetThreadLimit(VOID);
 
 
 /**
@@ -93,7 +120,7 @@ EFIAPI
 CreateThread(
     IN EFI_AP_PROCEDURE Method,
     IN VOID             *Context,
-    IN OUT MFTAH_THREAD  *NewThread
+    IN OUT MFTAH_THREAD *NewThread
 );
 
 

@@ -1,10 +1,6 @@
 #ifndef MFTAH_UEFI_H
 #define MFTAH_UEFI_H
 
-
-
-/* Using submodules, we can "pin" the UEFI project to
-    specific dependency versions. */
 #include "../../gnu-efi/inc/efi.h"
 #include "../../gnu-efi/inc/efilib.h"
 
@@ -54,18 +50,8 @@
 /* The maximum length of the password buffer. */
 #define MFTAH_MAX_PW_LEN    32
 
-/* The maximum length of a loadable payload file NAME from the local boot disk. */
-#define MFTAH_MAX_FILENAME_LENGTH   64
-
 /* The chunk sizes at which the ramdisk is loaded. */
 #define MFTAH_RAMDISK_LOAD_BLOCK_SIZE   (1 << 16)
-
-/* The path to the executable to load within the decrypted boot image. */
-/* TODO: This should probably change with the ARCH selection. */
-#define MFTAH_BOOT_EXE_PATH     L"EFI\\BOOT\\BOOTX64.EFI"
-
-/* The path to the MFTAH loader executable currently running (at UEFI runtime). */
-#define MFTAH_LOADER_EXE_PATH   L"EFI\\BOOT\\BOOTX64.EFI"
 
 /* Colors used by the application. */
 #define MFTAH_COLOR_DEFAULT     (EFI_WHITE          | EFI_BACKGROUND_BLUE )
@@ -75,20 +61,12 @@
 #define MFTAH_COLOR_DANGER      (EFI_LIGHTMAGENTA   | EFI_BACKGROUND_BLACK)
 #define MFTAH_COLOR_PANIC       (EFI_LIGHTRED       | EFI_BACKGROUND_BLACK)
 
-/*
- * Custom MFTAH EFI response codes.
- *   These do NOT all indicate an explicit ERROR status. They
- *   are sometimes used to signal the caller to an action.
- */
-#define EFI_NO_PAYLOAD_FOUND        0xd000000000000120
-#define EFI_SINGLE_PAYLOAD_FOUND    0xd000000000000121
-#define EFI_MULTI_PAYLOAD_FOUND     0xd000000000000122
 
-#define EFI_MENU_GO_BACK            0xd000000000000123
-
-#define EFI_INVALID_PASSWORD        0xd000000000000bad
+/* Any custom EFI response codes are created below as needed. */
+#define EFI_INVALID_PASSWORD        EFIERR(123)
 
 
+/* Swaps the bute ordering of a 32-bit value. */
 #define EFI_SWAP_ENDIAN_32(x) \
     ((((x) & 0xFF) << 24) | (((x) & 0xFF00) << 8) | (((x) & 0xFF0000) >> 8) | (((x) & 0xFF000000) >> 24))
 
@@ -96,8 +74,8 @@
 /* "Error check" macro. Returns the EFI_STATUS if it's not EFI_SUCCESS. */
 #define ERRCHECK(x) \
     { \
-    Status = (x); \
-    if (EFI_ERROR(Status)) { return Status; } \
+        Status = (x); \
+        if (EFI_ERROR(Status)) { return Status; } \
     }
 
 /* Quick conversion of UEFI time slices (100ns) to milliseconds. */
@@ -175,21 +153,21 @@
 
 
 /* pls don't change panic vars ok thx */
-static CHAR16 * s_panic_input = NULL;
-static CHAR16 s_panic_buffer[512] = {'P', 'A', 'N', 'I', 'C', '!', ' ', 0};
-static unsigned int s_panic_buffer_cursor = 7;
+STATIC CHAR16 *GlobalPanicString = NULL;
+STATIC CHAR16 GlobalPanicBuffer[512] = {'P', 'A', 'N', 'I', 'C', '!', ' ', 0};
+STATIC UINT16 GlobalPanicCursor = 7;
 
 #define HALT \
     { while (TRUE) BS->Stall(EFI_SECONDS_TO_MICROSECONDS(60)); }
 
 #define PANIC(x) \
     { \
-        s_panic_input = L##x; \
+        GlobalPanicString = L##x; \
         EFI_COLOR(MFTAH_COLOR_PANIC); \
-        do { s_panic_buffer[s_panic_buffer_cursor] = s_panic_input[s_panic_buffer_cursor - 7]; } \
-            while (++s_panic_buffer_cursor < 511 && '\0' != s_panic_input[s_panic_buffer_cursor - 7]); \
-        s_panic_buffer[s_panic_buffer_cursor] = '\0'; \
-        Print(s_panic_buffer); \
+        do { GlobalPanicBuffer[GlobalPanicCursor] = GlobalPanicString[GlobalPanicCursor - 7]; } \
+            while (++GlobalPanicCursor < 511 && '\0' != GlobalPanicString[GlobalPanicCursor - 7]); \
+        GlobalPanicBuffer[GlobalPanicCursor] = '\0'; \
+        Print(GlobalPanicBuffer); \
         Print(L"  Exit Code: '%d'", Status); \
         HALT; \
     }
@@ -197,48 +175,8 @@ static unsigned int s_panic_buffer_cursor = 7;
 #define ABORT(x) PANIC(x)
 
 
-
-/* A wrapper data structure for selected payload details. */
-typedef
-struct {
-    mftah_payload_t     *Payload;
-    BOOLEAN             FromMultiSelect;
-    CHAR16              *Name;
-    EFI_FILE_PROTOCOL   *VolumeHandle;
-    UINT8 VOLATILE      SharedMutex;
-} __attribute__((packed)) PAYLOAD;
-
-/**
- * A meta-container for thread objects. These get dynamically assigned to available MPS when started.
- */
-/* TODO: Why is threading stuff in here? */
-typedef
-struct S_MFTAH_THREAD {
-    UINTN VOLATILE              AssignedProcessorNumber;
-    EFI_EVENT VOLATILE          CompletionEvent;
-    BOOLEAN VOLATILE            Started;
-    BOOLEAN VOLATILE            Finished;
-    EFI_STATUS VOLATILE         ExitStatus;
-    EFI_AP_PROCEDURE            Method;
-    VOID VOLATILE *VOLATILE     Context;
-} __attribute__((packed)) MFTAH_THREAD;
-
-/**
- * Primary structure of decryption thread contexts using the MP library.
- */
-typedef
-struct {
-    MFTAH_THREAD VOLATILE   *Thread;
-    UINT64                  CurrentPlace;
-    mftah_work_order_t      *WorkOrder;
-    mftah_progress_t        *Progress;
-    UINT8                   Sha256Key[SIZE_OF_SHA_256_HASH];
-    UINT8                   InitializationVector[AES_BLOCKLEN];
-} __attribute__((packed)) DECRYPT_THREAD_CTX;
-
-
 /** 
- * A simple progress reporting hook that can be tied into certain application methods.
+ * A more friendly alias for the MFTAH progress hook type.
  */
 typedef
 mftah_fp__progress_hook_t
@@ -248,24 +186,14 @@ PROGRESS_UPDATE_HOOK;
 /* A required configuration file that specifies how to load or select a
     target MFTAH payload to chainload. The config file format is described
     in the Config driver. */
-static const CHAR16 *DefaultConfigFileName = L"\\EFI\\BOOT\\MFTAH.CFG";
+STATIC CONST CHAR16 *DefaultConfigFileName = L"\\EFI\\BOOT\\MFTAH.CFG";
 
 
 /* The Image Handle from EFI_MAIN, in case it's ever used in other modules (hint: it is). */
-extern EFI_HANDLE ENTRY_HANDLE;
+EXTERN EFI_HANDLE ENTRY_HANDLE;
 
 /* The vendor GUID for XMIT XYZ. */
-extern EFI_GUID gXmitVendorGuid;
-
-/* The filename of the currently-selected payload being operated on. */
-extern PAYLOAD VOLATILE gOperatingPayload;
-
-/* The global MFTAH protocol instance to use. */
-extern mftah_protocol_t *MFTAH;
-
-/* A static thread pool for when threading is actually enabled. */
-/* TODO: Convert this to dynamically-allocated memory when decrypting only. */
-extern MFTAH_THREAD VOLATILE Threads[MFTAH_MAX_THREAD_COUNT];
+EXTERN EFI_GUID gXmitVendorGuid;
 
 
 /* Lovely ASCII art banner. */

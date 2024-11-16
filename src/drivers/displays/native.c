@@ -126,7 +126,7 @@ TimerTick(IN EFI_EVENT Event,
     ) {
         BS->CloseEvent(Event);
 
-        EFI_COLOR(MFTAH_COLOR_WARNING);
+        STOP->SetAttribute(STOP, MFTAH_COLOR_WARNING);
         VARPRINTLN8(DefaultTimeoutStr);
         BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
 
@@ -140,7 +140,7 @@ TimerTick(IN EFI_EVENT Event,
     ) {
         BS->CloseEvent(Event);
 
-        EFI_COLOR(MFTAH_COLOR_PANIC);
+        STOP->SetAttribute(STOP, MFTAH_COLOR_PANIC);
         VARPRINTLN8(MaxTimeoutExceededtStr);
         BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
 

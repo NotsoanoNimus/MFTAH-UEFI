@@ -117,7 +117,7 @@ EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
 
     /* All drivers are initialized before the configuration is parsed. This
         means that they are all REQUIRED regardless of selected options. */
-    PRINT("Initializing...   ");
+    PRINTLN("Initializing...");
 
     if (EFI_ERROR((Status = AcpiInit())) || NULL == AcpiGetInstance()) {
         ABORT("Failed to initialize a compatible ACPI driver.");
@@ -133,6 +133,10 @@ EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
 
     if (EFI_ERROR((Status = ConfigInit())) || NULL == CONFIG) {
         ABORT("Failed to initialize the configuration driver.");
+    }
+
+    if (EFI_ERROR((Status = InitializeThreading())) || FALSE == IsThreadingEnabled()) {
+        EFI_WARNINGLN("Threading failed to initialize.\r\nCertain features may not be available.");
     }
 
     PRINTLN("ok");

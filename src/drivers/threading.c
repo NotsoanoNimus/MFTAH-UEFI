@@ -271,6 +271,19 @@ CreateThread(IN EFI_AP_PROCEDURE Method,
 }
 
 
+STATIC
+EFIAPI
+VOID
+ThreadMethodWrapper(VOID *Context)
+{
+    /* This wrapper function helps to FORCE the `FinishThread` method to be called,
+        even if the events system bugs out or experiences a synchronicity problem. */
+    MFTAH_THREAD *Thread = (MFTAH_THREAD *)Context;
+
+    Thread->Method(Thread->Context);
+    FinishThread(Thread->CompletionEvent, Thread);
+}
+
 EFI_STATUS
 EFIAPI
 StartThread(IN MFTAH_THREAD *Thread,
@@ -308,11 +321,11 @@ StartThread(IN MFTAH_THREAD *Thread,
             DPRINTLN("StartThread: MP #%u is available. Assigning thread task.", i);
             ERRCHECK(
                 mEfiMpServicesProtocol->StartupThisAP(mEfiMpServicesProtocol,
-                                                      Thread->Method,
+                                                      ThreadMethodWrapper,
                                                       i,
                                                       Thread->CompletionEvent,
-                                                      0,
-                                                      (VOID *)Thread->Context,
+                                                      Thread->TimeoutMicroseconds,
+                                                      (VOID *)Thread,
                                                       NULL)
             );
 
@@ -344,7 +357,8 @@ FinishThread(IN EFI_EVENT EventSource,
 {
     UINTN ProcNumber = 0;
 
-    if (FALSE == IsThreadingEnabled()) return EFI_LOAD_ERROR;
+    if (FALSE == IsThreadingEnabled()) return;
+    if (TRUE == ((MFTAH_THREAD *)Thread)->Finished) return;
 
     if (NULL == Thread) {
         EFI_WARNINGLN("FinishThread: The thread to close is NULL.");
@@ -374,7 +388,7 @@ VOID
 EFIAPI
 JoinThread(IN MFTAH_THREAD *Thread)
 {
-    if (FALSE == IsThreadingEnabled()) return EFI_LOAD_ERROR;
+    if (FALSE == IsThreadingEnabled()) return;
 
     while (Thread->Started && !Thread->Finished) {
         BS->Stall(EFI_SECONDS_TO_MICROSECONDS(0.1));
@@ -388,7 +402,7 @@ VOID
 EFIAPI
 DestroyThread(IN MFTAH_THREAD *Thread)
 {
-    if (FALSE == IsThreadingEnabled()) return EFI_LOAD_ERROR;
+    if (FALSE == IsThreadingEnabled()) return;
 
     while (Thread->Started && !Thread->Finished) {
         BS->Stall(EFI_SECONDS_TO_MICROSECONDS(0.01));

@@ -53,6 +53,7 @@ struct S_MFTAH_THREAD {
     EFI_STATUS VOLATILE         ExitStatus;
     EFI_AP_PROCEDURE            Method;
     VOID VOLATILE *VOLATILE     Context;
+    UINTN                       TimeoutMicroseconds;
 } MFTAH_THREAD;
 
 

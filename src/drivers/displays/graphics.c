@@ -783,12 +783,6 @@ GraphicsPrintProgress(IN CONST SIMPLE_DISPLAY *This,
 
 STATIC
 VOID
-FlipToFalse(EFI_EVENT Event,
-            VOID *Context)
-{ BOOLEAN *b = (BOOLEAN *)Context; if (NULL != b) *b = FALSE; }
-
-STATIC
-VOID
 GraphicsStall(IN CONST SIMPLE_DISPLAY *This,
               IN UINTN TimeInMilliseconds)
 {

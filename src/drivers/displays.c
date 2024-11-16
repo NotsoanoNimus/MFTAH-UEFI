@@ -25,6 +25,12 @@ EXTERN SIMPLE_DISPLAY TUI;
 EXTERN SIMPLE_DISPLAY NUI;
 
 
+VOID
+FlipToFalse(EFI_EVENT Event,
+            VOID *Context)
+{ BOOLEAN *b = (BOOLEAN *)Context; if (NULL != b) *b = FALSE; }
+
+
 EFI_STATUS
 DisplaysSetMode(IN CONST DISPLAY_MODE Mode,
                 IN BOOLEAN Reset)

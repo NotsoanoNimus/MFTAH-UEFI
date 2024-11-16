@@ -368,13 +368,6 @@ NativePrintProgress(IN CONST SIMPLE_DISPLAY *This,
 }
 
 
-// TODO: Move this common flip function out and into `displays`.
-STATIC
-VOID
-FlipToFalse(EFI_EVENT Event,
-            VOID *Context)
-{ BOOLEAN *b = (BOOLEAN *)Context; if (NULL != b) *b = FALSE; }
-
 STATIC
 VOID
 NativeStall(IN CONST SIMPLE_DISPLAY *This,

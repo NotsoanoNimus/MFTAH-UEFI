@@ -213,5 +213,15 @@ DisplaysSetMode(
 );
 
 
+/**
+ * Used by the UEFI Events system to indicate when an operation should stop.
+ */
+VOID
+FlipToFalse(
+    IN EFI_EVENT Event,
+    IN VOID *Context
+);
+
+
 
 #endif   /* MFTAH_DISPLAYS_H */

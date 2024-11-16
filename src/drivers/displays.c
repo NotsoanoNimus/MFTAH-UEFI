@@ -21,6 +21,9 @@ EXTERN SIMPLE_DISPLAY GUI;
 /* The primary display protocol object for TEXT mode. */
 EXTERN SIMPLE_DISPLAY TUI;
 
+/* The primary display protocol object for NATIVE mode. */
+EXTERN SIMPLE_DISPLAY NUI;
+
 
 EFI_STATUS
 DisplaysSetMode(IN CONST DISPLAY_MODE Mode,
@@ -36,7 +39,7 @@ DisplaysSetMode(IN CONST DISPLAY_MODE Mode,
     switch (Mode) {
         case GRAPHICAL: DisplayObject = &GUI;   break;
         case TEXT:      DisplayObject = &TUI;   break;
-        // TODO: NONE/BLANK display mode
+        case NATIVE:    DisplayObject = &NUI;   break;
 
         default: return EFI_NOT_FOUND;
     }

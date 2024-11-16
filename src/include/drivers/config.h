@@ -58,7 +58,7 @@ typedef
 enum {
     TEXT        = (1 << 1),
     GRAPHICAL   = (1 << 2),
-    NONE        = (1 << 3)
+    NATIVE      = (1 << 3)
 } DISPLAY_MODE;
 
 typedef

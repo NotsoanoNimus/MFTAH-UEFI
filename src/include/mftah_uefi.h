@@ -117,40 +117,56 @@
     Print(L##x L"\r\n", ##__VA_ARGS__);
 #define VARPRINT(x) \
     Print((x));
+#define VARPRINT8(x) \
+    { \
+        CHAR8 *x##_as16 = AsciiStrToUnicode(x); \
+        if (NULL != x##_as16) { \
+            Print(x##_as16); \
+            FreePool(x##_as16); \
+        } \
+    }
 #define VARPRINTLN(x) \
-    Print((x));
+    { VARPRINT(x); Print(L"\r\n"); }
+#define VARPRINTLN8(x) \
+    { VARPRINT8(x); Print(L"\r\n"); }
 
 /* Warning wrapper macros. */
 #define EFI_WARNING(x, ...) \
-    EFI_COLOR(MFTAH_COLOR_WARNING); PRINT(x, ##__VA_ARGS__); EFI_COLOR(MFTAH_COLOR_DEFAULT);
+    { EFI_COLOR(MFTAH_COLOR_WARNING); PRINT(x, ##__VA_ARGS__); EFI_COLOR(MFTAH_COLOR_DEFAULT); }
 #define EFI_WARNINGLN(x, ...) \
-    EFI_WARNING(x, ##__VA_ARGS__); PRINTLN("\r\n");
+    { EFI_WARNING(x, ##__VA_ARGS__); PRINTLN("\r\n"); }
 
 /* Danger wrapper macros. */
 #define EFI_DANGER(x, ...) \
-    EFI_COLOR(MFTAH_COLOR_DANGER); PRINT(x, ##__VA_ARGS__); EFI_COLOR(MFTAH_COLOR_DEFAULT);
+    { EFI_COLOR(MFTAH_COLOR_DANGER); PRINT(x, ##__VA_ARGS__); EFI_COLOR(MFTAH_COLOR_DEFAULT); }
 #define EFI_DANGERLN(x, ...) \
-    EFI_DANGER(x, ##__VA_ARGS__); PRINTLN("\r\n");
+    { EFI_DANGER(x, ##__VA_ARGS__); PRINTLN("\r\n"); }
 
 
 #if EFI_DEBUG==1
 /* Debug-only. Prints debugging information when enabled by compiler flag. */
 #   define DPRINT(x, ...) \
+    { \
         EFI_COLOR(MFTAH_COLOR_DEBUG); \
         Print(L"DEBUG:  " L##x, ##__VA_ARGS__); \
-        EFI_COLOR(MFTAH_COLOR_DEFAULT);
+        EFI_COLOR(MFTAH_COLOR_DEFAULT); \
+    }
 #   define DPRINTLN(x, ...) \
+    { \
         EFI_COLOR(MFTAH_COLOR_DEBUG); \
         Print(L"DEBUG:  " L##x L"\r\n", ##__VA_ARGS__); \
-        EFI_COLOR(MFTAH_COLOR_DEFAULT);
+        EFI_COLOR(MFTAH_COLOR_DEFAULT); \
+    }
 /* Debug-only. Dumps raw memory details when enabled by compiler flag. */
 #   define MEMDUMP(ptr, len) \
+    { \
         EFI_COLOR(MFTAH_COLOR_DEBUG); \
         for (int i = 0; i < (len); ++i) { \
         Print(L"%02x%c", *((UINT8 *)(ptr)+i), !((i+1) % 16) ? '\n' : ' '); \
         } \
         if (!(len % 16)) Print(L"\r\n"); \
-        EFI_COLOR(MFTAH_COLOR_DEFAULT);
+        EFI_COLOR(MFTAH_COLOR_DEFAULT); \
+    }
 #else
 #   define DPRINT(x, ...)
 #   define DPRINTLN(x, ...)
@@ -164,18 +180,18 @@ static CHAR16 s_panic_buffer[512] = {'P', 'A', 'N', 'I', 'C', '!', ' ', 0};
 static unsigned int s_panic_buffer_cursor = 7;
 
 #define HALT \
-    while (TRUE) BS->Stall(EFI_SECONDS_TO_MICROSECONDS(60));
+    { while (TRUE) BS->Stall(EFI_SECONDS_TO_MICROSECONDS(60)); }
 
 #define PANIC(x) \
     { \
-    s_panic_input = L##x; \
-    EFI_COLOR(MFTAH_COLOR_PANIC); \
-    do { s_panic_buffer[s_panic_buffer_cursor] = s_panic_input[s_panic_buffer_cursor - 7]; } \
-        while (++s_panic_buffer_cursor < 511 && '\0' != s_panic_input[s_panic_buffer_cursor - 7]); \
-    s_panic_buffer[s_panic_buffer_cursor] = '\0'; \
-    Print(s_panic_buffer); \
-    Print(L"  Exit Code: '%d'", Status); \
-    HALT; \
+        s_panic_input = L##x; \
+        EFI_COLOR(MFTAH_COLOR_PANIC); \
+        do { s_panic_buffer[s_panic_buffer_cursor] = s_panic_input[s_panic_buffer_cursor - 7]; } \
+            while (++s_panic_buffer_cursor < 511 && '\0' != s_panic_input[s_panic_buffer_cursor - 7]); \
+        s_panic_buffer[s_panic_buffer_cursor] = '\0'; \
+        Print(s_panic_buffer); \
+        Print(L"  Exit Code: '%d'", Status); \
+        HALT; \
     }
 
 #define ABORT(x) PANIC(x)

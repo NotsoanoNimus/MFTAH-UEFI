@@ -235,6 +235,7 @@ ParseColor__Store:
     
     switch (Configuration.Mode) {
         case TEXT:
+        case NATIVE:
             /* In TEXT mode, search the list of well-known colors. If none match, error. */
             for (UINTN i = 0; ; ++i) {
                 if (NULL == CommonNamedColors[i].Name) {
@@ -311,9 +312,6 @@ ParseColor__Store:
                 }
             }
 
-            break;
-
-        case NONE:
             break;
 
         default:
@@ -705,6 +703,7 @@ DECL_HANDLER(display)
     /* Convert to lower-case. */
     if (*Data < 'a') *Data += ' ';
 
+    // TODO: Revisit default color palette.
     switch (*Data) {
         case 'g':
             Configuration.Mode = GRAPHICAL;
@@ -726,7 +725,12 @@ DECL_HANDLER(display)
 
         case 't':
             Configuration.Mode = TEXT;
+            goto Display__SetConsoleColors;
 
+        case 'n':
+            Configuration.Mode = NATIVE;
+
+        Display__SetConsoleColors:
             Configuration.Colors.Background = EFI_BACKGROUND_BLACK;
             Configuration.Colors.Border = EFI_BACKGROUND_LIGHTGRAY;
             Configuration.Colors.Text.Foreground = EFI_WHITE;
@@ -743,7 +747,7 @@ DECL_HANDLER(display)
             break;
 
         default:
-            ErrorMsg = L"Invalid `display` type. Options are 'g' (Graphical) and 't' (Text)";
+            ErrorMsg = L"Invalid `display` type. Options are 'g' (Graphical), 't' (Text), and 'n' (Native)";
             return EFI_INVALID_PARAMETER;
     }
 

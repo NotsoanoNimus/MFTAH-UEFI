@@ -57,6 +57,85 @@ StartLoadingAnimation(IN BOOLEAN VOLATILE *IsLoading)
 
 
 STATIC
+EFIAPI
+mftah_status_t
+SpawnMftahDecryptionWorkers(IN mftah_immutable_protocol_t Mftah,
+                            IN mftah_work_order_t *WorkOrder,
+                            IN immutable_ref_t Sha256Key,
+                            IN immutable_ref_t InitializationVector,
+                            IN mftah_progress_t *ProgressMeta OPTIONAL)
+{
+    // TODO: Branch based on threading enable flag.
+    EFI_STATUS Status = EFI_SUCCESS;
+    mftah_status_t MftahStatus = MFTAH_SUCCESS;
+    mftah_progress_t ThreadProgress = {0};
+    mftah_progress_t *ThreadProgressClone = NULL;
+    mftah_work_order_t *WorkOrderClone = NULL;
+
+    if (
+        NULL == Mftah
+        || NULL == WorkOrder
+        || NULL == Sha256Key
+        || NULL == InitializationVector
+    ) {
+        return MFTAH_INVALID_PARAMETER;
+    }
+
+    /* The library should never return a thread index higher than what is possible. */
+    if (WorkOrder->thread_index >= MFTAH_MAX_THREAD_COUNT) {
+        DISPLAY->Panic(DISPLAY,
+                       "Encountered an invalid thread index while decrypting.",
+                       EFI_ABORTED,
+                       TRUE,
+                       EFI_SECONDS_TO_MICROSECONDS(10));
+    }
+
+    if (!WorkOrder->length) return MFTAH_SUCCESS;
+
+    /* Set up the progress hook. */
+    ThreadProgress.context = NULL;
+    ThreadProgress.hook = (FALSE != WorkOrder->suppress_progress)
+        ? NULL
+        : ProgressWrapper;
+        // : (IsThreadingEnabled() ? SaveThreadProgress : ProgressWrapper);
+
+    // if (!IsThreadingEnabled()) {
+        /* This will synchronously run the operation. Each progress message is tracked individually. */
+        CHAR8 *ProgressMessage =
+            (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (128 + 1));
+        AsciiSPrint(ProgressMessage, 128, "Decrypting Block %u...", (WorkOrder->thread_index + 1));
+
+        ProgressStatusMessage = ProgressMessage;
+
+        MftahStatus = MFTAH_CRYPT_HOOK_DEFAULT(Mftah,
+                                               WorkOrder,
+                                               Sha256Key,
+                                               InitializationVector,
+                                               &ThreadProgress);
+
+        FreePool(ProgressMessage);
+        ProgressStatusMessage = NULL;
+
+        return MftahStatus;
+    // }
+
+    return MFTAH_SUCCESS;
+}
+
+
+STATIC
+VOID
+MftahDecryptionSpin(IN UINT64 *QueuedBytes)
+{
+    // TODO: This will become easier to use when threading is figured out. For now, do nothing.
+    UINT64 Progress = 0;
+    UINT64 TotalProgress = *QueuedBytes;
+
+    return;
+}
+
+
+STATIC
 EFI_STATUS
 LoaderReadImageParts(IN LOADER_CONTEXT *Context,
                      IN EFI_HANDLE TargetHandle,
@@ -308,6 +387,13 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
     at = 0; DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
     if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
+    /* Set to FALSE by threads (if enabled) to stop the asynchronous loading animation. */
+    BOOLEAN VOLATILE StillLoading = TRUE;
+
+    /* If threading is enabled, we can keep the animation going during load
+        operations, since the speed is limited by the media and not the CPU. */
+    if (IsThreadingEnabled()) StartLoadingAnimation(&StillLoading);
+
     /* NOTE: Use the 's' starting point here because it's always set to the full file path. */
     CHAR16 *PayloadPath = AsciiStrToUnicode(s);
     if (NULL == PayloadPath) return EFI_OUT_OF_RESOURCES;
@@ -327,6 +413,9 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
                       (Ramdisk->IsMFTAH ? sizeof(mftah_payload_header_t) : 0),
                       ProgressWrapper));
     FreePool(PayloadPath);
+
+    StillLoading = FALSE;
+    DISPLAY->ClearScreen(DISPLAY, CONFIG->Colors.Background);
 
     // TODO: MFTAH decrypt & decompression -- these types of decorators need to be moved to a more generic function/place
     // TODO This whole thing is sloppy and rushed for my own testing enjoyment.
@@ -377,8 +466,8 @@ LoaderReadDataRamdisk(IN DATA_RAMDISK *Ramdisk,
                                                  PayloadWrapper,
                                                  Ramdisk->MFTAHKey,
                                                  AsciiStrLen(Ramdisk->MFTAHKey),
-                                                 MFTAH_CRYPT_HOOK_DEFAULT,   /* TODO Use threading? */
-                                                 NULL)
+                                                 SpawnMftahDecryptionWorkers,   /* TODO Use threading? */
+                                                 MftahDecryptionSpin)
         )) {
             /* TODO: Better reasons/error messages. */
             EFI_DANGERLN("Failed to decrypt the MFTAH payload object. Code '%u'.", MftahStatus);
@@ -557,84 +646,6 @@ GetPassword__EnterKey:
     /* Set the password pointer and exit success. */
     Context->Chain->MFTAHKey = Password;
     return EFI_SUCCESS;
-}
-
-
-STATIC
-EFIAPI
-mftah_status_t
-SpawnMftahDecryptionWorkers(IN mftah_immutable_protocol_t Mftah,
-                            IN mftah_work_order_t *WorkOrder,
-                            IN immutable_ref_t Sha256Key,
-                            IN immutable_ref_t InitializationVector,
-                            IN mftah_progress_t *ProgressMeta OPTIONAL)
-{
-    // TODO: Branch based on threading enable flag.
-    EFI_STATUS Status = EFI_SUCCESS;
-    mftah_status_t MftahStatus = MFTAH_SUCCESS;
-    mftah_progress_t ThreadProgress = {0};
-    mftah_progress_t *ThreadProgressClone = NULL;
-    mftah_work_order_t *WorkOrderClone = NULL;
-
-    if (
-        NULL == Mftah
-        || NULL == WorkOrder
-        || NULL == Sha256Key
-        || NULL == InitializationVector
-    ) {
-        return MFTAH_INVALID_PARAMETER;
-    }
-
-    /* The library should never return a thread index higher than what is possible. */
-    if (WorkOrder->thread_index >= MFTAH_MAX_THREAD_COUNT) {
-        DISPLAY->Panic(DISPLAY,
-                       "Encountered an invalid thread index while decrypting.",
-                       EFI_ABORTED,
-                       TRUE,
-                       EFI_SECONDS_TO_MICROSECONDS(10));
-    }
-
-    if (!WorkOrder->length) return MFTAH_SUCCESS;
-
-    /* Set up the progress hook. */
-    ThreadProgress.context = NULL;
-    ThreadProgress.hook = (FALSE != WorkOrder->suppress_progress)
-        ? NULL
-        : ProgressWrapper;
-        // : (IsThreadingEnabled() ? SaveThreadProgress : ProgressWrapper);
-
-    // if (!IsThreadingEnabled()) {
-        /* This will synchronously run the operation. Each progress message is tracked individually. */
-        CHAR8 *ProgressMessage =
-            (CHAR8 *)AllocateZeroPool(sizeof(CHAR8) * (128 + 1));
-        AsciiSPrint(ProgressMessage, 128, "Decrypting Block %u...", (WorkOrder->thread_index + 1));
-
-        ProgressStatusMessage = ProgressMessage;
-
-        MftahStatus = MFTAH_CRYPT_HOOK_DEFAULT(Mftah,
-                                               WorkOrder,
-                                               Sha256Key,
-                                               InitializationVector,
-                                               &ThreadProgress);
-
-        FreePool(ProgressMessage);
-        ProgressStatusMessage = NULL;
-
-        return MftahStatus;
-    // }
-
-    return MFTAH_SUCCESS;
-}
-
-
-VOID
-MftahDecryptionSpin(IN UINT64 *QueuedBytes)
-{
-    // TODO: This will become easier to use when threading is figured out. For now, do nothing.
-    UINT64 Progress = 0;
-    UINT64 TotalProgress = *QueuedBytes;
-
-    return;
 }
 
 

@@ -8,6 +8,7 @@
 #include "../include/drivers/displays.h"
 #include "../include/drivers/mftah_adapter.h"
 #include "../include/drivers/ramdisk.h"
+#include "../include/drivers/threading.h"
 
 #include "../include/core/input.h"
 #include "../include/core/util.h"
@@ -37,6 +38,21 @@ ProgressWrapper(IN CONST UINTN *Current,
                 IN VOID *Extra)
 {
     DISPLAY->Progress(DISPLAY, ProgressStatusMessage, *Current, *OutOfTotal);
+}
+
+
+STATIC
+VOID
+StartLoadingAnimation(IN BOOLEAN VOLATILE *IsLoading)
+{
+    MFTAH_THREAD m = {0};
+    EFI_STATUS Status = EFI_SUCCESS;
+
+    Status = CreateThread(DISPLAY->AsyncLoadingAnimation, (VOID *)IsLoading, &m);
+    if (EFI_ERROR(Status)) return;
+
+    /* Kick off the thread and don't wait up for it. */
+    StartThread(&m, FALSE);
 }
 
 
@@ -185,12 +201,20 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
     at = 0; DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);
     if (FALSE == CONFIG->Quick) DISPLAY->Stall(DISPLAY, 500);
 
+    /* Set to FALSE by threads (if enabled) to stop the asynchronous loading animation. */
+    BOOLEAN VOLATILE StillLoading = TRUE;
+
+    /* If threading is enabled, we can keep the animation going during load
+        operations, since the speed is limited by the media and not the CPU. */
+    if (IsThreadingEnabled()) StartLoadingAnimation(&StillLoading);
+
     /* NOTE: Use the 's' starting point here because it's always set to the full file path. */
     CHAR16 *PayloadPath = AsciiStrToUnicode(s);
     if (NULL == PayloadPath) return EFI_OUT_OF_RESOURCES;
 
     /* Convert the path separators to the m$ version ('\'). Not doing this
         will cause `ReadFile` to return errors. */
+    // TODO Move to the chain validation method from `config.c`
     for (CHAR16 *s = PayloadPath; *s; ++s) if (L'/' == *s) *s = L'\\';
 
     if (TRUE == Context->Chain->PayloadParts) {
@@ -212,6 +236,7 @@ LoaderReadImage(IN LOADER_CONTEXT *Context)
     FreePool(PayloadPath);
 
     /* Close out with a completed progress detail and a small stall. */
+    StillLoading = FALSE;
     ProgressStatusMessage = "Success!";
     at = total;
     DISPLAY->Progress(DISPLAY, ProgressStatusMessage, at, total);

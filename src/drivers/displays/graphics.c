@@ -90,15 +90,20 @@ STATIC VOID GraphicsInputPopup(
     IN CHAR8 *ErrorMessage OPTIONAL
 );
 
+STATIC VOID GraphicsAsyncAnimation(
+    IN VOID *Context
+);
+
 /* Construct the static display protocol instance. */
 SIMPLE_DISPLAY GUI = {
-    .Initialize     = GraphicsInit,
-    .Destroy        = GraphicsDestroy,
-    .ClearScreen    = GraphicsClearScreen,
-    .Panic          = GraphicsPanic,
-    .Progress       = GraphicsPrintProgress,
-    .Stall          = GraphicsStall,
-    .InputPopup     = GraphicsInputPopup,
+    .Initialize             = GraphicsInit,
+    .Destroy                = GraphicsDestroy,
+    .ClearScreen            = GraphicsClearScreen,
+    .Panic                  = GraphicsPanic,
+    .Progress               = GraphicsPrintProgress,
+    .Stall                  = GraphicsStall,
+    .InputPopup             = GraphicsInputPopup,
+    .AsyncLoadingAnimation  = GraphicsAsyncAnimation,
 
     .MENU           = NULL
 };
@@ -892,6 +897,16 @@ GraphicsInputPopup(IN CONST SIMPLE_DISPLAY *This,
 
     /* Finally, render it all. */
     FB->RenderComponent(FB, MftahKeyPromptBlt, TRUE);
+}
+
+
+STATIC
+VOID
+GraphicsAsyncAnimation(IN VOID *Context)
+{
+    BOOLEAN VOLATILE *IsLoading = (BOOLEAN VOLATILE *)Context;
+
+    LoadingAnimationLoop(LoadingIconUnderlayBlt, ~(CONFIG->Colors.Background), IsLoading);
 }
 
 

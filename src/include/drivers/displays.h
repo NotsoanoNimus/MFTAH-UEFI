@@ -167,6 +167,16 @@ VOID
     IN  CHAR8                   *ErrorMessage   OPTIONAL
 );
 
+/**
+ * Pass-through function to call each Display-specific loading animation.
+ * 
+ * @param[in]   Context Cast it to a boolean; tells whether the animation should keep going.
+ */
+typedef
+VOID
+(EFIAPI *HOOK_DISPLAY_MODE__ASYNC_ANIMATION)(
+    IN  VOID                    *Context
+);
 
 
 struct S_EFI_SIMPLE_ABSTRACT_DISPLAYS_PROTOCOL {
@@ -177,6 +187,7 @@ struct S_EFI_SIMPLE_ABSTRACT_DISPLAYS_PROTOCOL {
     HOOK_DISPLAY_MODE__PROGRESS             Progress;
     HOOK_DISPLAY_MODE__STALL                Stall;
     HOOK_DISPLAY_MODE__INPUT_POPUP          InputPopup;
+    HOOK_DISPLAY_MODE__ASYNC_ANIMATION      AsyncLoadingAnimation;
 
     EFI_MENU_RENDERER_PROTOCOL              *MENU;
 };

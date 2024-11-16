@@ -64,15 +64,20 @@ STATIC VOID NativeInputPopup(
     IN CHAR8 *ErrorMessage OPTIONAL
 );
 
+STATIC VOID NativeAsyncAnimation(
+    IN VOID *Context
+);
+
 /* Construct the static display protocol instance. */
 SIMPLE_DISPLAY NUI = {
-    .Initialize     = NativeInit,
-    .Destroy        = NativeDestroy,
-    .ClearScreen    = NativeClearScreen,
-    .Panic          = NativePanic,
-    .Progress       = NativePrintProgress,
-    .Stall          = NativeStall,
-    .InputPopup     = NativeInputPopup,
+    .Initialize             = NativeInit,
+    .Destroy                = NativeDestroy,
+    .ClearScreen            = NativeClearScreen,
+    .Panic                  = NativePanic,
+    .Progress               = NativePrintProgress,
+    .Stall                  = NativeStall,
+    .InputPopup             = NativeInputPopup,
+    .AsyncLoadingAnimation  = NativeAsyncAnimation,
 
     .MENU           = NULL
 };
@@ -459,4 +464,13 @@ NativeInputPopup(IN CONST SIMPLE_DISPLAY *This,
             PRINT(" ");
         }
     }
+}
+
+
+STATIC
+VOID
+NativeAsyncAnimation(IN VOID *Context)
+{
+    /* Text mode and Native mode cannot have asynchronous access to the ConOut handle. */
+    return;
 }

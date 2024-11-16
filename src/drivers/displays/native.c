@@ -431,9 +431,8 @@ NativeInputPopup(IN CONST SIMPLE_DISPLAY *This,
     UINTN InputLength = AsciiStrLen(CurrentInput);
     STOP->SetAttribute(STOP, CONFIG_TEXT_COLOR(Text));
 
-    // TODO: This is not clearing the asterisks from the previous password input. Fix.
     PRINT("\r");
-    for (UINTN i = 0; i < (NativeContext->Rows - 1); ++i) { PRINT(" "); }
+    for (UINTN i = 0; i < (NativeContext->Columns - 1); ++i) { PRINT(" "); }
     PRINT("\r");
 
     /* Print the error message if it's set. This uses static colors. */

@@ -338,16 +338,28 @@ NativePrintProgress(IN CONST SIMPLE_DISPLAY *This,
     UINT8 PercentDone, PercentByTen;
     double PercentRaw;
 
-    PercentRaw = (double)(Current) / (double)(OutOfTotal);
-    PercentDone = MIN(100, (int)(PercentRaw * 100.0f));
-    PercentByTen = MIN(10, (PercentDone / 10));
+    /* Printing a progress bar should require a total of over 100.
+        This is arbitrary but it keeps nonsense progress updates that
+        look good in other modes from looking like total trash here. */
+    if (OutOfTotal > 100) {
+        PercentRaw = (double)(Current) / (double)(OutOfTotal);
+        PercentDone = MIN(100, (int)(PercentRaw * 100.0f));
+        PercentByTen = MIN(10, (PercentDone / 10));
 
-    PRINT("\r %3d%% [", PercentDone);
-    for (int i = 0; i < PercentByTen; ++i) PRINT("=");
-    for (int i = 0; i < (10 - PercentByTen); ++i) PRINT(" ");
-    PRINT("] (%8x / %8x) ", Current, OutOfTotal);
+        PRINT("\r %3d%% [", PercentDone);
+        for (int i = 0; i < PercentByTen; ++i) PRINT("=");
+        for (int i = 0; i < (10 - PercentByTen); ++i) PRINT(" ");
+        PRINT("] (%8x / %8x) ", Current, OutOfTotal);
+    }
 
     if (NULL != Message) VARPRINT8(Message);
+
+    /* Usually, the '100% done' progress update comes through once when
+        it's asserted at the end of an operation. This is a good time to
+        go to the next line so we don't end up with funky run-over messages
+        from one operation's `Message` to another's that comes directly
+        afterwards. */
+    if (Current == OutOfTotal) PRINT("\r\n");
 }
 
 
@@ -387,10 +399,10 @@ NativeStall(IN CONST SIMPLE_DISPLAY *This,
         PRINT("\r  ");
 
         switch (Step % 3) {
-            case 0: PRINT("/");
-            case 1: PRINT("-");
-            case 2: PRINT("\\");
-            case 3: PRINT("|");
+            case 0: PRINT("/");     break;
+            case 1: PRINT("-");     break;
+            case 2: PRINT("\\");    break;
+            case 3: PRINT("|");     break;
         }
 
         BS->Stall(EFI_SECONDS_TO_MICROSECONDS(0.2));
@@ -415,4 +427,37 @@ NativeInputPopup(IN CONST SIMPLE_DISPLAY *This,
         || NULL == Prompt
         || NULL == CurrentInput
     ) return;
+
+    UINTN InputLength = AsciiStrLen(CurrentInput);
+    STOP->SetAttribute(STOP, CONFIG_TEXT_COLOR(Text));
+
+    // TODO: This is not clearing the asterisks from the previous password input. Fix.
+    PRINT("\r");
+    for (UINTN i = 0; i < (NativeContext->Rows - 1); ++i) { PRINT(" "); }
+    PRINT("\r");
+
+    /* Print the error message if it's set. This uses static colors. */
+    if (NULL != ErrorMessage) {
+        STOP->SetAttribute(STOP, MFTAH_COLOR_PANIC);
+        VARPRINT8(ErrorMessage);
+        STOP->SetAttribute(STOP, CONFIG_TEXT_COLOR(Text));
+        PRINT("\r\n\r\n");
+    }
+
+    VARPRINT8(Prompt); PRINT(" ");
+
+    if (TRUE == IsHidden) {
+        for (UINTN i = 0; i < MFTAH_MAX_PW_LEN; ++i) {
+            if (i < InputLength) {
+                PRINT("*");
+            } else {
+                PRINT(" ");
+            }
+        }
+    } else {
+        VARPRINT8(CurrentInput);
+        for (UINTN i = (MFTAH_MAX_PW_LEN - InputLength); i > 0; --i) {
+            PRINT(" ");
+        }
+    }
 }

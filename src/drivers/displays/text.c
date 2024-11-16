@@ -438,7 +438,7 @@ TimerTick(IN EFI_EVENT Event,
                TimerTextStartRow,
                MFTAH_COLOR_PANIC,
                FALSE);
-        BS->Stall(2000000);
+        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
 
         m->TimeoutOccurred = TRUE;
         goto TimerTick__Exit;
@@ -464,7 +464,7 @@ TimerTick(IN EFI_EVENT Event,
                TimerTextStartRow,
                MFTAH_COLOR_PANIC,
                FALSE);
-        BS->Stall(2000000);
+        BS->Stall(EFI_SECONDS_TO_MICROSECONDS(3));
 
         Shutdown(EFI_TIMEOUT);
         HALT;
@@ -672,7 +672,6 @@ TextClearScreen(IN CONST SIMPLE_DISPLAY *This,
         NULL == STOP
         || NULL == This
         || NULL == TextContext
-        || NULL == TextContext->BlankRow
     ) return;
 
     /* Both clear the screen AND print an entire screen's worth of new-lines.
@@ -684,9 +683,11 @@ TextClearScreen(IN CONST SIMPLE_DISPLAY *This,
 
     /* By manually setting the cursor to the origin and having prints overwrite
         the current 'display', we avoid slowness caused by emulated terminal scrolling. */
-    STOP->SetCursorPosition(STOP, 0, 0);
-    for (UINTN i = 0; i <= ModeRows; ++i) {
-        STOP->OutputString(STOP, TextContext->BlankRow);
+    if (NULL != TextContext->BlankRow) {
+        STOP->SetCursorPosition(STOP, 0, 0);
+        for (UINTN i = 0; i <= ModeRows; ++i) {
+            STOP->OutputString(STOP, TextContext->BlankRow);
+        }
     }
 }
 
@@ -1102,7 +1103,6 @@ Rect(IN UINTN StartColumn,
         for (UINTN i = 1; i <= BoxHeight; ++i) {
             STOP->SetCursorPosition(STOP, (StartColumn + BoxWidth), (StartRow + i));
             STOP->OutputString(STOP, BoxShadow);
-            // STOP->OutputString(STOP, BoxShadow);   /* double up */
         }
     }
 

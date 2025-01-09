@@ -160,7 +160,7 @@ ReadFile(IN EFI_HANDLE BaseImageHandle,
                                  | EFI_FILE_HIDDEN
                                  | EFI_FILE_SYSTEM));
     if (EFI_ERROR(Status)) {
-        EFI_DANGERLN("Error opening file handle (%u).", Status);
+        EFI_DANGERLN("Error opening file handle '%s' (%u).", Filename, Status);
         return Status;
     }
 

@@ -343,6 +343,78 @@ Reboot(IN CONST EFI_STATUS Reason)
 }
 
 
+EFI_STATUS
+EFIAPI
+GetMemoryMap(OUT EFI_MEMORY_MAP_META *Map)
+{
+    if (NULL == Map) return EFI_INVALID_PARAMETER;
+
+    EFI_STATUS Status = EFI_SUCCESS;
+
+    Status = BS->GetMemoryMap(&(Map->MemoryMapSize),
+                              Map->BaseDescriptor,
+                              &(Map->MapKey),
+                              &(Map->DescriptorSize),
+                              &(Map->DescriptorVersion));
+    if (EFI_SUCCESS != Status && EFI_BUFFER_TOO_SMALL != Status) {
+        return Status;
+    }
+
+    if (0 == Map->MemoryMapSize || 0 == Map->DescriptorSize) {
+        return EFI_NOT_FOUND;
+    }
+
+    /* Account for the possible fragmentation/expansion of the memory map based on the below allocation. */
+    Map->MemoryMapSize += (2 * Map->DescriptorSize);
+    /* NOTE: The size is 2x because a new range inserted into the middle of an existing entry will result
+        in 2 new entries: the allocation as well as the trailing region/fragment. */
+
+    Map->BaseDescriptor = (EFI_MEMORY_DESCRIPTOR *)AllocateZeroPool(Map->MemoryMapSize);
+    if (NULL == Map->BaseDescriptor) return EFI_OUT_OF_RESOURCES;
+
+    Status = BS->GetMemoryMap(&(Map->MemoryMapSize),
+                              Map->BaseDescriptor,
+                              &(Map->MapKey),
+                              &(Map->DescriptorSize),
+                              &(Map->DescriptorVersion));
+    if (EFI_ERROR(Status)) return Status;
+
+    return EFI_SUCCESS;
+}
+
+
+VOID
+EFIAPI
+FinalizeExitBootServices(IN EFI_MEMORY_MAP_META *Meta)
+{
+    if (NULL == ST || NULL == Meta) return;
+
+    /* Set the virtual address mapping for an OS to acquire and rearrange via Runtime Services.
+        We shouldn't concern ourselves with the return code too much: the runtime OS can figure
+        out any further accesses or virtual memory mapping. */
+    // TODO: Don't think this is actually necessary.
+    // RT->SetVirtualAddressMap(Meta->MemoryMapSize,
+    //                          Meta->DescriptorSize,
+    //                          Meta->DescriptorVersion,
+    //                          Meta->BaseDescriptor);
+
+    /* Wipe out key entries in the System Table, according to the UEFI spec. */
+    ST->ConsoleInHandle = NULL;
+    ST->ConsoleOutHandle = NULL;
+    ST->StandardErrorHandle = NULL;
+    ST->ConIn = NULL;
+    ST->ConOut = NULL;
+    ST->StdErr = NULL;
+    ST->BootServices = NULL;
+
+    /* Recompute the CRC32 of the EFI System Table (since the table has been modified). */
+    SetCrc(&(ST->Hdr));
+
+    /* Nullify the global reference to the Boot Services interface. */
+    BS = NULL;
+}
+
+
 BOOLEAN
 EFIAPI
 AsciiIsNumeric(IN CONST CHAR8 *String)

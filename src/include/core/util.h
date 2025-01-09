@@ -5,6 +5,17 @@
 
 
 
+typedef
+struct {
+    UINTN                   MemoryMapSize;
+    EFI_MEMORY_DESCRIPTOR   *BaseDescriptor;
+    UINTN                   MapKey;
+    UINTN                   DescriptorSize;
+    UINT32                  DescriptorVersion;
+} EFI_MEMORY_MAP_META;
+
+
+
 /**
  * Get the size of the file from the given handle.
  *
@@ -161,6 +172,36 @@ Reboot(
 
 
 /**
+ * Populate meta-information about the current EFI memory map.
+ * 
+ * @param[out]  Map Populated with a callee-allocated pointer to a new EFI_MEMORY_MAP structure. The caller must free this structure.
+ * 
+ * @returns Any failures encountered while getting the memory map.
+ */
+EFI_STATUS
+EFIAPI
+GetMemoryMap(
+    OUT EFI_MEMORY_MAP_META *Map
+);
+
+
+/**
+ * Finalizes the call to ExitBootServices. This sets several fields of the EFI
+ *  System Table to NULL in accordance with the UEFI specification details under
+ *  the ExitBootServices protocol method.
+ * 
+ * @param[in]   Meta    A meta-object encapsulating information about an acquired memory map from `GetMemoryMap`.
+ * 
+ * @returns Nothing. This simply sets some ST references to NULL.
+ */
+VOID
+EFIAPI
+FinalizeExitBootServices(
+    IN EFI_MEMORY_MAP_META *Meta
+);
+
+
+/**
  * Gets whether a string is specifically numeric. Allows negative numbers.
  * 
  * @param[in]   String  The string to check.
@@ -169,7 +210,9 @@ Reboot(
  */
 BOOLEAN
 EFIAPI
-AsciiIsNumeric(IN CONST CHAR8 *String);
+AsciiIsNumeric(
+    IN CONST CHAR8 *String
+);
 
 
 /**
@@ -182,7 +225,9 @@ AsciiIsNumeric(IN CONST CHAR8 *String);
  */
 UINTN
 EFIAPI
-AsciiAtoi(IN CONST CHAR8 *String);
+AsciiAtoi(
+    IN CONST CHAR8 *String
+);
 
 
 /**

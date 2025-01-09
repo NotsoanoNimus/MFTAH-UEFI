@@ -34,6 +34,7 @@ LoadImage(IN LOADER_CONTEXT *Context)
                               NULL,
                               &RamdiskDevicePath);
     if (EFI_ERROR(Status)) {
+        // TODO: Use the DISPLAY panic. This 'native' version should be used only where necessary.
         PANIC("Could not register the loaded ramdisk through the active protocol.");
     }
 

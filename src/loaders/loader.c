@@ -107,6 +107,7 @@ SpawnMftahDecryptionWorkers(IN mftah_immutable_protocol_t Mftah,
 
         ProgressStatusMessage = ProgressMessage;
 
+        // TODO! This fails in TEXT/NATIVE modes on certain payloads with code (20) (W-HMAC), but not in GRAPHICAL.
         MftahStatus = MFTAH_CRYPT_HOOK_DEFAULT(Mftah,
                                                WorkOrder,
                                                Sha256Key,
@@ -129,7 +130,7 @@ MftahDecryptionSpin(IN UINT64 *QueuedBytes)
 {
     // TODO: This will become easier to use when threading is figured out. For now, do nothing.
     UINT64 Progress = 0;
-    UINT64 TotalProgress = *QueuedBytes;
+    // UINT64 TotalProgress = *QueuedBytes;
 
     return;
 }

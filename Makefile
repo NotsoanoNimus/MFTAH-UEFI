@@ -29,7 +29,7 @@ LIBMFTAH		= $(MFTAH_DIR)/build/libmftah.a
 
 OPTIM			= -O3
 CFLAGS			= -target $(ARCH)-unknown-windows -ffreestanding -DMFTAH_ARCH=$(ARCH) \
-					-mno-stack-arg-probe -Wall $(EFIINCS) $(OPTIM) \
+					-masm=intel -mno-stack-arg-probe -Wall $(EFIINCS) $(OPTIM) \
 					-DMFTAH_RELEASE_DATE=$(shell printf "0x`date +%Y``date +%m`%d" `date +%02d`)
 LDFLAGS			= -target $(ARCH)-unknown-windows -nostdlib -Wl,-entry:efi_main \
 					-Wl,-subsystem:efi_application -fuse-ld=lld-link -mno-stack-arg-probe $(EFILIBS) $(MFTAHLIBS)

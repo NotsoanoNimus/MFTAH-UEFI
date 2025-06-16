@@ -188,7 +188,7 @@ struct {
 typedef
 struct {
     MultibootInfoTagHeader  Header;
-    UINT8                   BootLoaderNameStringData[];
+    CHAR                    *BootLoaderNameStringData;
 } MultibootInfoTagLoaderName;
 
 typedef

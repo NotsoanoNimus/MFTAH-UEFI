@@ -586,6 +586,8 @@ GetPassword__NoRedraw:
 
         switch (Key.Key.UnicodeChar) {
             case CHAR_BACKSPACE:
+            case 0x007F: /* CHAR_DELETE: */
+GetPassword__Backspace:
                 if (0 == PassLength) goto GetPassword__NoRedraw;
 
                 --p;
@@ -600,10 +602,14 @@ GetPassword__NoRedraw:
                 goto GetPassword__EnterKey;
 
             default:
-                if (PassLength >= MFTAH_MAX_PW_LEN) continue;
-
                 CHAR8 EnteredKey = (CHAR8)(Key.Key.UnicodeChar & 0xFF);
-                if (' ' > EnteredKey || '~' < EnteredKey) continue;   /* filter bad characters */
+                if (' ' > EnteredKey || '~' < EnteredKey) {
+                    if (0x0008 == Key.Key.ScanCode) goto GetPassword__Backspace;
+
+                    continue;   /* filter unprintable (bad) characters */
+                }
+
+                if (PassLength >= MFTAH_MAX_PW_LEN) continue;
 
                 *p = EnteredKey;   /* TODO: What about muh Unicode? :/ */
                 ++p;
@@ -723,9 +729,7 @@ LoaderDestroyContext(IN LOADER_CONTEXT *Context)
 
     /* Black out the screen one last time, then destroy the display driver. */
     DISPLAY->ClearScreen(DISPLAY, 0);
-
     DISPLAY->Destroy(DISPLAY);
-    FreePool(DISPLAY);
     DISPLAY = NULL;
 }
 

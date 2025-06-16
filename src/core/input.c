@@ -178,7 +178,7 @@ ReadChar16KeyboardInput(IN CONST CHAR16 *Prompt,
 
         if (L'\x0A' == InputKey.UnicodeChar || L'\x0D' == InputKey.UnicodeChar) {
             break;
-        } else if (L'\x08' == InputKey.UnicodeChar) {
+        } else if (L'\x08' == InputKey.UnicodeChar || L'\x7F' == InputKey.UnicodeChar) {
             InputBuffer[InputLength] = 0;
             if (InputLength > 0) {
                 InputLength--;

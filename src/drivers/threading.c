@@ -203,11 +203,21 @@ InitializeThreading(VOID)
     mSystemMultiprocessingContext.BspProcessorNumber = BspProcessorNumber;
     mSystemMultiprocessingContext.MpList = ListOfSystemMPs;
 
+    /* If the amount of processors is <= 1, then the BSP is the only processor.
+        Therefore, MP services isn't truly enabled. */
+    if (mSystemMultiprocessingContext.MpCount <= 1) {
+        DPRINTLN("-- MP Services disabled: <= 1 MP processor.");
+        mSystemMultiprocessingContext.MpCount = 0;   /* disable threading (see `IsThreadingEnabled` below) */
+        return EFI_LOAD_ERROR;
+    }
+
     /* Finally, perform a test of threading in action. If it doesn't actually work,
         then it needs to be disabled despite the presence of the driver. */
+    DPRINTLN("-- Executing threading litmus test.");
     if (!ThreadingLitmusTest()) {
         EFI_DANGERLN("-- Multiprocessing support disabled.");
         FreePool(ListOfSystemMPs);
+        mSystemMultiprocessingContext.MpCount = 0;   /* disable threading (see `IsThreadingEnabled` below) */
         return EFI_LOAD_ERROR;
     }
 
@@ -215,11 +225,12 @@ InitializeThreading(VOID)
 }
 
 
+/* NOTE: MP count must be GREATER THAN 1, meaning there is at least one other processor than the BSP. */
 BOOLEAN
 EFIAPI
 IsThreadingEnabled(VOID)
 {
-    return NULL != mEfiMpServicesProtocol || mSystemMultiprocessingContext.MpCount >= 1;
+    return NULL != mEfiMpServicesProtocol && mSystemMultiprocessingContext.MpCount > 1;
 }
 
 
@@ -291,6 +302,7 @@ StartThread(IN MFTAH_THREAD *Thread,
 {
     EFI_STATUS Status = EFI_SUCCESS;
 
+    /* NOTE: During the litmus test, this will already be true. */
     if (FALSE == IsThreadingEnabled()) return EFI_LOAD_ERROR;
 
     if (Thread->Started) {

@@ -158,7 +158,7 @@ VerifyAndLoadElf(IN EFI_PHYSICAL_ADDRESS LoadedElfPhysAddr,
 
         /* Allocate pages based on the ELF's specification of its PH segments. */
         Status = BS->AllocatePages(AllocateAddress,
-                                   EfiLoaderCode,
+                                   EfiReservedMemoryType,
                                    EFI_SIZE_TO_PAGES(P_MemorySize),
                                    (EFI_PHYSICAL_ADDRESS *)(&P_PhysicalAddress));
         if (EFI_ERROR(Status)) {
@@ -261,6 +261,123 @@ LoadImage(IN LOADER_CONTEXT *Context)
     InfoTagSet[1] = AllocateZeroPool(LoaderNameSize);
     ((MultibootInfoTagHeader *)(InfoTagSet[1]))->Type = MBI_LOADER_NAME;
     ((MultibootInfoTagHeader *)(InfoTagSet[1]))->Size = LoaderNameSize;
+    CopyMem(
+        &(((MultibootInfoTagLoaderName *)(InfoTagSet[1]))->BootLoaderNameStringData),
+        LoaderName,
+        AsciiStrLen(LoaderName)
+    );
+
+    /* EFI SystemTable (64-bit) Pointer. */
+    InfoTagSet[4] = AllocateZeroPool(sizeof(MultibootInfoTagPointer64));
+    ((MultibootInfoTagHeader *)(InfoTagSet[4]))->Type = MBI_EFI_ST_64;
+    ((MultibootInfoTagHeader *)(InfoTagSet[4]))->Size = sizeof(MultibootInfoTagPointer64);
+    ((MultibootInfoTagPointer64 *)(InfoTagSet[4]))->PhysicalAddress = (EFI_PHYSICAL_ADDRESS)ST;
+
+    /* Framebuffer. We use GOP here, even if the current DISPLAY object is not in GRAPHICAL Mode.
+        NOTE: We also ignore Framebuffer tags from the OS kernel MB2 signature at this time.
+        Also NOTE: We need to do this BEFORE the memory map. */
+    InfoTagSet[5] = AllocateZeroPool(sizeof(MultibootInfoTagFramebuffer));
+    ((MultibootInfoTagHeader *)(InfoTagSet[5]))->Type = MBI_FRAMEBUFFER;
+    ((MultibootInfoTagHeader *)(InfoTagSet[5]))->Size = sizeof(MultibootInfoTagFramebuffer);
+    Status = DisplaysSetMode(GRAPHICAL, TRUE);
+    if (EFI_ERROR(Status)) {
+        DISPLAY->Panic(DISPLAY,
+                       "Failed to change to a Graphical display mode. Trying anyway.",
+                       Status,
+                       FALSE,
+                       EFI_SECONDS_TO_MICROSECONDS(3));
+
+        goto ElfEntrySkipMultiboot;
+    }
+
+    Status = DISPLAY->Initialize(DISPLAY, CONFIG);
+    if (EFI_ERROR(Status)) {
+        DISPLAY->Panic(DISPLAY,
+                       "Failed to initialize Graphical display mode. Trying anyway.",
+                       Status,
+                       FALSE,
+                       EFI_SECONDS_TO_MICROSECONDS(3));
+
+        goto ElfEntrySkipMultiboot;
+    }
+
+    /* Upon success, 'gop_hnd->Mode' will contain everything this section of code needs... */
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop_hnd = NULL;
+    Status = BS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid,
+                                NULL,
+                                (VOID **)&gop_hnd);
+    if (EFI_ERROR(Status) || NULL == gop_hnd || NULL == gop_hnd->Mode) {
+        DISPLAY->Panic(DISPLAY,
+                       "Failed to locate Graphical display mode handle. Trying anyway.",
+                       Status,
+                       FALSE,
+                       EFI_SECONDS_TO_MICROSECONDS(3));
+
+        goto ElfEntrySkipMultiboot;
+    }
+
+    if (PixelFormatMax <= gop_hnd->Mode->Info->PixelFormat || PixelBltOnly == gop_hnd->Mode->Info->PixelFormat) {
+        DISPLAY->Panic(DISPLAY,
+                       "The GOP driver does not indicate support of a physical framebuffer (BLT only). Trying anyway.",
+                       EFI_LOAD_ERROR,
+                       FALSE,
+                       EFI_SECONDS_TO_MICROSECONDS(3));
+
+        goto ElfEntrySkipMultiboot;
+    }
+
+    /* The framebuffer pixel size is usually 32 bits. But it's possible for a GOP implementation
+        to use a masking technique. In such a case, the highest bit on the combination of all
+        masks represents the element length (pixel size). */
+    UINTN pixel_size = 4;   /* bytes */
+    if (PixelBitMask == gop_hnd->Mode->Info->PixelFormat) {
+        UINT32 masks_combined = (
+            gop_hnd->Mode->Info->PixelInformation.RedMask
+            || gop_hnd->Mode->Info->PixelInformation.GreenMask
+            || gop_hnd->Mode->Info->PixelInformation.BlueMask
+            || gop_hnd->Mode->Info->PixelInformation.ReservedMask
+        );
+
+        UINTN highest_bit = 0;
+        for (int i = 32; i > 0; ++i) {
+            if (masks_combined & (1 << (i - 1))) {
+                highest_bit = i;
+                break;
+            }
+        }
+
+        pixel_size = !highest_bit ? 4 : (highest_bit >> 3);
+    }
+
+    MultibootInfoTagFramebuffer *tag_fb = (MultibootInfoTagFramebuffer *)(InfoTagSet[5]);
+    tag_fb->FramebufferPhysAddr = (UINT64)(gop_hnd->Mode->FrameBufferBase); 
+    tag_fb->Pitch = (UINT32)(gop_hnd->Mode->Info->PixelsPerScanLine * pixel_size);
+    tag_fb->Width = (UINT32)(gop_hnd->Mode->Info->HorizontalResolution);
+    tag_fb->Height = (UINT32)(gop_hnd->Mode->Info->VerticalResolution);
+    tag_fb->BitsPerPixel = (UINT8)(pixel_size << 3);
+    tag_fb->Type = 1;   /* MFTAH-UEFI doesn't provide any other mode at this time */
+    tag_fb->Reserved = 0x0000;
+    tag_fb->RedMaskSize = 8;
+    tag_fb->GreenMaskSize = 8;
+    tag_fb->BlueMaskSize = 8;
+
+    /* Positions are calculated as (([color_value] & (1 << [masksize]) - 1) << ([position] - [masksize]). Simple, right? */
+    switch (gop_hnd->Mode->Info->PixelFormat) {
+        case PixelRedGreenBlueReserved8BitPerColor:
+            tag_fb->RedFieldPosition = 32;
+            tag_fb->GreenFieldPosition = 24;
+            tag_fb->BlueFieldPosition = 16;
+            break;
+        case PixelBlueGreenRedReserved8BitPerColor:
+            tag_fb->RedFieldPosition = 16;
+            tag_fb->GreenFieldPosition = 24;
+            tag_fb->BlueFieldPosition = 32;
+            break;
+        case PixelBitMask:
+            // TODO: Add support for this :/
+            break;
+        default: break;
+    }
 
     /* Memory maps (both for EFI and the ordinary type). */
     /* Get the system's current memory mapping. */
@@ -279,6 +396,7 @@ LoadImage(IN LOADER_CONTEXT *Context)
     UINTN MemMapTagSize = (sizeof(MultibootInfoTagMemoryMap) +
         (sizeof(MultibootMemoryMapEntry) * (Mb2MemMap.MemoryMapSize / Mb2MemMap.DescriptorSize)));
     InfoTagSet[2] = AllocateZeroPool(MemMapTagSize);   /* outdates the memory map LOL */
+    EFI_WARNINGLN("MB2 MEMORY MAP STRUCTURE BASE: %p (%u bytes)", InfoTagSet[2], MemMapTagSize);
     ((MultibootInfoTagHeader *)(InfoTagSet[2]))->Type = MBI_MEMORY_MAP;
     ((MultibootInfoTagHeader *)(InfoTagSet[2]))->Size = MemMapTagSize;
     ((MultibootInfoTagMemoryMap *)(InfoTagSet[2]))->EntrySize = sizeof(MultibootMemoryMapEntry);
@@ -293,10 +411,13 @@ LoadImage(IN LOADER_CONTEXT *Context)
         );
 
         MultibootMemoryMapEntry *entry = (MultibootMemoryMapEntry *)
-            ((EFI_PHYSICAL_ADDRESS)(InfoTagSet[2]) + sizeof(MultibootInfoTagMemoryMap))
-            + (i * sizeof(MultibootMemoryMapEntry));
+            (
+                ((EFI_PHYSICAL_ADDRESS)(InfoTagSet[2]) + sizeof(MultibootInfoTagMemoryMap))
+                + (i * sizeof(MultibootMemoryMapEntry))
+            );
 
         /* Populate the map entry. */
+        EFI_WARNINGLN("        (insert record at %p)", entry);
         entry->Base = d->PhysicalStart;
         entry->Length = (d->NumberOfPages * EFI_PAGE_SIZE);
         entry->Type = d->Type;
@@ -312,19 +433,6 @@ LoadImage(IN LOADER_CONTEXT *Context)
             Mb2MemMap.BaseDescriptor,
             Mb2MemMap.MemoryMapSize);
 MultibootSkipMemoryMap:
-
-    /* EFI SystemTable (64-bit) Pointer. */
-    InfoTagSet[4] = AllocateZeroPool(sizeof(MultibootInfoTagPointer64));
-    ((MultibootInfoTagHeader *)(InfoTagSet[4]))->Type = MBI_EFI_ST_64;
-    ((MultibootInfoTagHeader *)(InfoTagSet[4]))->Size = sizeof(MultibootInfoTagPointer64);
-    ((MultibootInfoTagPointer64 *)(InfoTagSet[4]))->PhysicalAddress = (EFI_PHYSICAL_ADDRESS)ST;
-
-    /* Framebuffer. We use GOP here, even if the current DISPLAY object is not in GRAPHICAL Mode.
-        NOTE: We also ignore Framebuffer tags from the OS kernel MB2 signature at this time. */
-    InfoTagSet[5] = AllocateZeroPool(sizeof(MultibootInfoTagFramebuffer));
-    ((MultibootInfoTagHeader *)(InfoTagSet[5]))->Type = MBI_FRAMEBUFFER;
-    ((MultibootInfoTagHeader *)(InfoTagSet[5]))->Size = sizeof(MultibootInfoTagFramebuffer);
-    // TODO ^ FB
 
     /* Finally, create the tags structure to pass to the loaded OS kernel. */
     MultibootInfoHeader *ResultantMb2Header = NULL;
@@ -351,7 +459,7 @@ MultibootSkipMemoryMap:
 
     MultibootContext->LoadedInfoHeader = ResultantMb2Header;
 
-    /* Validate the Multiboot2 header details (on both sides) before calling the ELF. */
+/* Validate the Multiboot2 header details (on both sides) before calling the ELF. */
     Status = Multiboot2->ValidateContext(Multiboot2, MultibootContext);
     if (EFI_ERROR(Status)) {
         DISPLAY->Panic(DISPLAY,

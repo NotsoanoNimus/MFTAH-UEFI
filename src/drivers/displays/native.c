@@ -386,7 +386,7 @@ NativeStall(IN CONST SIMPLE_DISPLAY *This,
                     &StallEvent);
 
     BS->SetTimer(StallEvent,
-                 TimerPeriodic,
+                 TimerRelative,
                  (10 * 1000 * TimeInMilliseconds));
 
     /* While the condition is true, write out a spinny thingy on a new line. */
@@ -396,7 +396,7 @@ NativeStall(IN CONST SIMPLE_DISPLAY *This,
     while (TRUE == Stall) {
         PRINT("\r  ");
 
-        switch (Step % 3) {
+        switch (Step % 4) {
             case 0: PRINT("/");     break;
             case 1: PRINT("-");     break;
             case 2: PRINT("\\");    break;

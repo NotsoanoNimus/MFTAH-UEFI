@@ -37,7 +37,6 @@ DisplaysSetMode(IN CONST DISPLAY_MODE Mode,
 {
     if (NULL != DISPLAY) {
         DISPLAY->Destroy(DISPLAY);
-        FreePool(DISPLAY);
     }
 
     SIMPLE_DISPLAY *DisplayObject = NULL;

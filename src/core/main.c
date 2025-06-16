@@ -119,27 +119,32 @@ EnvironmentInitialize(IN EFI_HANDLE ImageHandle)
         means that they are all REQUIRED regardless of selected options. */
     PRINTLN("Initializing...");
 
+    PRINTLN("    ACPI...");
     if (EFI_ERROR((Status = AcpiInit())) || NULL == AcpiGetInstance()) {
         ABORT("Failed to initialize a compatible ACPI driver.");
     }
 
+    PRINTLN("    MFTAH protocols...");
     if (EFI_ERROR((Status = MftahInit())) || NULL == MftahGetInstance()) {
         ABORT("Failed to initialize the MFTAH driver.");
     }
 
+    PRINTLN("    Ramdisk driver...");
     if (EFI_ERROR((Status = RamdiskDriverInit(ImageHandle)))) {
         ABORT("Failed to initialize the ramdisk driver.");
     }
 
+    PRINTLN("    Configuration...");
     if (EFI_ERROR((Status = ConfigInit())) || NULL == CONFIG) {
         ABORT("Failed to initialize the configuration driver.");
     }
 
+    PRINTLN("    Threading...");
     if (EFI_ERROR((Status = InitializeThreading())) || FALSE == IsThreadingEnabled()) {
         EFI_WARNINGLN("Threading failed to initialize.\r\nCertain features may not be available.");
     }
 
-    PRINTLN("ok");
+    PRINTLN("=== Initialization complete! ===");
 }
 
 

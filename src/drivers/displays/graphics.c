@@ -792,7 +792,7 @@ GraphicsStall(IN CONST SIMPLE_DISPLAY *This,
     if (TRUE == CONFIG->Quick) return;
 
     BS->CreateEvent((EVT_TIMER | EVT_NOTIFY_SIGNAL), TPL_NOTIFY, FlipToFalse, (VOID *)&Stall, &StallEvent);
-    BS->SetTimer(StallEvent, TimerPeriodic, 10 * 1000 * TimeInMilliseconds);
+    BS->SetTimer(StallEvent, TimerRelative, 10 * 1000 * TimeInMilliseconds);
 
     if (EFI_ERROR(LoadingAnimationLoop(LoadingIconUnderlayBlt, ~(CONFIG->Colors.Background), &Stall))) {
         /* Stall normally if the animation can't be rendered. */

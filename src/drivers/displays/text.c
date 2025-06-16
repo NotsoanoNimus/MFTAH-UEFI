@@ -814,7 +814,7 @@ TextStall(IN CONST SIMPLE_DISPLAY *This,
                     &StallEvent);
 
     BS->SetTimer(StallEvent,
-                 TimerPeriodic,
+                 TimerRelative,
                  (10 * 1000 * TimeInMilliseconds));
 
     /* Always placed at the center-bottom of the screen. */

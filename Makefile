@@ -78,7 +78,7 @@ clean-objs:
 #   of the EFI file is rather expedient anyway, and it
 #   helps not to mix up release and debug build artifacts.
 debug: CFLAGS += -DEFI_DEBUG=1
-debug: TARGET = $(TARGET).DEBUG
+###debug: TARGET = $(TARGET).DEBUG
 debug: $(TARGET) clean-objs
 
 all: $(TARGET)
